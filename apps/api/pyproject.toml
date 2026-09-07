@@ -1,0 +1,78 @@
+[project]
+name = "vajra-api"
+version = "0.1.0"
+description = "VAJRA: Sovereign On-Premise Agentic AI Workbench (orchestrator API)"
+requires-python = ">=3.12,<3.15"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "sqlmodel>=0.0.22",
+    "aiosqlite>=0.20",
+    "greenlet>=3.1",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    "httpx>=0.27",
+    "jsonschema>=4.23",
+    "psutil>=6.1",
+    "pyyaml>=6.0",
+    "python-multipart>=0.0.12",
+]
+
+[project.optional-dependencies]
+# Real document generation. Installed by default in the container image.
+artifacts = ["python-docx>=1.1"]
+# Heavy, deferred subsystems. Not required for the scaffold to run or test.
+rag = ["qdrant-client>=1.12", "fastembed>=0.4", "docling>=2.0", "pymupdf>=1.24"]
+sandbox = ["docker>=7.1"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "anyio>=4.6",
+    "ruff>=0.8",
+    "mypy>=1.13",
+    "types-psutil",
+    "types-pyyaml",
+    "types-jsonschema",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["vajra"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["."]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC", "S", "RUF", "TID"]
+ignore = ["S101", "B008", "UP042", "S105", "S108", "S607", "ASYNC109"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S", "E501"]
+
+[tool.ruff.lint.flake8-tidy-imports]
+ban-relative-imports = "parents"
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unreachable = true
+disallow_any_explicit = false
+plugins = []
+exclude = ["^tests/"]
+
+[[tool.mypy.overrides]]
+module = ["docx.*", "qdrant_client.*", "docker.*", "fastembed.*", "fitz.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = "-q"
+filterwarnings = ["error::DeprecationWarning:vajra.*"]

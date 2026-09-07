@@ -1,0 +1,100 @@
+# VAJRA Hardware-Aware Model Profile: High-Perf 24GB (Enterprise Workstation / Server)
+# 24 GB physical VRAM, 3+ concurrent resident models, high-throughput batching.
+
+hardware:
+  profile: high-perf-24gb
+  description: "24GB high-end GPU (e.g. RTX 4090 24GB / RTX 6000 Ada / A10G 24GB). Multi-resident fleet execution."
+  vram_mb: 24576
+  max_usable_vram_mb: 22800
+  max_loaded_models: 3
+  keep_alive: 120m
+  preferred_embedding_device: cpu
+
+runtime:
+  id: ollama
+  kind: ollama
+  base_url: http://127.0.0.1:11434
+
+models:
+  - id: general-reasoning
+    display_name: "Qwen 2.5 32B"
+    role: general
+    runtime_id: ollama
+    runtime_model_id: qwen2.5:32b
+    capabilities:
+      text: 0.96
+      reasoning: 0.95
+    context_window: 32768
+    max_output_tokens: 8192
+    num_ctx: 32768
+    device: gpu
+    vram_gb: 18.5
+    quantization: Q4_K_M
+    modalities_in:
+      - text
+    priority: 60
+    enabled: true
+    license: apache-2.0
+
+  - id: coding-specialist
+    display_name: "Qwen 2.5 Coder 32B"
+    role: coding
+    runtime_id: ollama
+    runtime_model_id: qwen2.5-coder:32b
+    capabilities:
+      text: 0.95
+      coding: 0.98
+      tool_calling: 0.97
+      structured_output: 0.97
+    context_window: 32768
+    max_output_tokens: 8192
+    num_ctx: 32768
+    device: gpu
+    vram_gb: 18.8
+    quantization: Q4_K_M
+    modalities_in:
+      - text
+    priority: 90
+    enabled: true
+    license: apache-2.0
+
+  - id: vision-document
+    display_name: "Qwen 2.5 VL 7B"
+    role: vision
+    runtime_id: ollama
+    runtime_model_id: qwen2.5-vl:7b
+    capabilities:
+      text: 0.88
+      vision: 0.94
+      doc_understanding: 0.92
+    context_window: 16384
+    max_output_tokens: 4096
+    num_ctx: 16384
+    device: gpu
+    vram_gb: 5.5
+    quantization: Q4_K_M
+    modalities_in:
+      - text
+      - image
+    priority: 75
+    enabled: true
+    license: apache-2.0
+
+  - id: text-embedding
+    display_name: "BGE-M3 (CPU)"
+    role: embedding
+    runtime_id: ollama
+    runtime_model_id: bge-m3
+    capabilities:
+      embedding: 0.95
+    context_window: 8192
+    max_output_tokens: 0
+    num_ctx: 8192
+    device: cpu
+    vram_gb: 0.0
+    quantization: F16
+    modalities_in:
+      - text
+    priority: 90
+    enabled: true
+    license: mit
