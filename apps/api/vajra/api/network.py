@@ -101,6 +101,19 @@ async def nft_status(context: Context) -> NftStatus:
     return result
 
 
+def _find_violation(exc: BaseException | None) -> SovereigntyViolation | None:
+    if exc is None:
+        return None
+    if isinstance(exc, SovereigntyViolation):
+        return exc
+    if hasattr(exc, "exceptions"):
+        for sub in getattr(exc, "exceptions", []):
+            found = _find_violation(sub)
+            if found is not None:
+                return found
+    return _find_violation(exc.__cause__ or exc.__context__)
+
+
 @router.post("/probe", response_model=ProbeResult)
 async def probe_external(context: Context) -> ProbeResult:
     """Deliberately attempt an external call, and report what happened.
@@ -114,27 +127,15 @@ async def probe_external(context: Context) -> ProbeResult:
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
             response = await client.get(target)
-    except SovereigntyViolation as exc:
-        return ProbeResult(
-            target=target,
-            blocked=True,
-            layer="app",
-            detail=exc.detail,
-            caller=str(exc.context.get("caller") or ""),
-        )
-    except httpx.HTTPError as exc:
-        # The guard raises inside httpx's transport, which wraps it. Unwrap to
-        # find out whether this was a block or a genuine network failure.
-        cause = exc.__cause__ or exc.__context__
-        while cause is not None and not isinstance(cause, SovereigntyViolation):
-            cause = cause.__cause__ or cause.__context__
-        if isinstance(cause, SovereigntyViolation):
+    except Exception as exc:
+        violation = _find_violation(exc)
+        if violation is not None:
             return ProbeResult(
                 target=target,
                 blocked=True,
                 layer="app",
-                detail=cause.detail,
-                caller=str(cause.context.get("caller") or ""),
+                detail=violation.detail,
+                caller=str(violation.context.get("caller") or ""),
             )
         return ProbeResult(
             target=target,
