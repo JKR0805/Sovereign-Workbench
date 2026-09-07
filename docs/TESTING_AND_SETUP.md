@@ -205,41 +205,32 @@ curl -s http://127.0.0.1:8000/api/models
 ---
 
 ### Test 4: Document Ingestion (Real Local RAG)
-Upload an industrial inspection report (Markdown or PDF) to trigger parsing, chunking, CPU embedding generation, and Qdrant vector indexing:
+Upload the included sample industrial inspection report (`samples/heat_exchanger_e102.md`) to trigger parsing, chunking, CPU embedding generation, and Qdrant vector indexing:
 
+**Windows Command Prompt (cmd.exe)**:
+```cmd
+curl -X POST "http://127.0.0.1:8000/api/knowledge/documents" -F "file=@samples/heat_exchanger_e102.md"
+```
+
+**PowerShell**:
 ```powershell
-# Create a sample engineering inspection document
-$doc = @"
-# Heat Exchanger E-102 Inspection Report
-Date: 2026-09-07
-Asset Tag: E-102
-Measured wall thickness: 6.8 mm across all tube passes.
-Operating Pressure: 42.5 bar
-Corrosion allowance: 1.2 mm
-
-## Maintenance Thresholds
-Minimum allowable retirement thickness: 6.4 mm as per ASME Section VIII.
-Inspection Conclusion: Equipment within acceptable safety margins.
-"@
-Set-Content -Path "e102_report.md" -Value $doc
-
-# Upload the document via PowerShell
 $form = @{
-    file = Get-Item "e102_report.md"
+    file = Get-Item "samples/heat_exchanger_e102.md"
 }
 $uploaded = Invoke-RestMethod -Uri "http://127.0.0.1:8000/api/knowledge/documents" -Method Post -Form $form
 $uploaded | ConvertTo-Json
 ```
-**Equivalent curl**:
+
+**Linux / macOS (Bash)**:
 ```bash
-curl -X POST "http://127.0.0.1:8000/api/knowledge/documents" \
-     -F "file=@e102_report.md"
+curl -X POST "http://127.0.0.1:8000/api/knowledge/documents" -F "file=@samples/heat_exchanger_e102.md"
 ```
+
 **Response**:
 ```json
 {
-  "id": "76495df02ad44a0eb52b9ba25c13e1c6",
-  "filename": "e102_report.md",
+  "id": "6e28be402c654da0be348eb7ae4a0a48",
+  "filename": "heat_exchanger_e102.md",
   "status": "indexed",
   "page_count": 1,
   "scanned_page_count": 0,
@@ -252,6 +243,13 @@ curl -X POST "http://127.0.0.1:8000/api/knowledge/documents" \
 
 ### Test 5: Inspect Extracted Document Chunks
 Inspect the structure-aware chunks and token counts stored in SQLite:
+
+**Windows Command Prompt (cmd.exe)** (replace `<DOC_ID>` with the `id` from Test 4):
+```cmd
+curl -s "http://127.0.0.1:8000/api/knowledge/documents/<DOC_ID>/chunks"
+```
+
+**PowerShell**:
 ```powershell
 $docId = $uploaded.id
 Invoke-RestMethod -Uri "http://127.0.0.1:8000/api/knowledge/documents/$docId/chunks" -Method Get | ConvertTo-Json -Depth 3
@@ -261,6 +259,13 @@ Invoke-RestMethod -Uri "http://127.0.0.1:8000/api/knowledge/documents/$docId/chu
 
 ### Test 6: Hybrid Search with Verified Citations
 Execute a semantic query against the local vector index:
+
+**Windows Command Prompt (cmd.exe)**:
+```cmd
+curl -X POST "http://127.0.0.1:8000/api/knowledge/search" -H "Content-Type: application/json" -d "{\"query\": \"What is the measured wall thickness for E-102?\", \"top_k\": 3}"
+```
+
+**PowerShell**:
 ```powershell
 $searchPayload = @{
     query = "What is the measured wall thickness for E-102 and what is the retirement threshold?"
@@ -269,34 +274,36 @@ $searchPayload = @{
 
 Invoke-RestMethod -Uri "http://127.0.0.1:8000/api/knowledge/search" -Method Post -Body $searchPayload -ContentType "application/json" | ConvertTo-Json -Depth 4
 ```
-**Equivalent curl**:
+
+**Linux / macOS (Bash)**:
 ```bash
 curl -X POST "http://127.0.0.1:8000/api/knowledge/search" \
      -H "Content-Type: application/json" \
-     -d '{"query": "What is the measured wall thickness for E-102 and what is the retirement threshold?", "top_k": 3}'
+     -d '{"query": "What is the measured wall thickness for E-102?", "top_k": 3}'
 ```
+
 **Response**:
 ```json
 {
-  "query": "What is the measured wall thickness for E-102 and what is the retirement threshold?",
+  "query": "What is the measured wall thickness for E-102?",
   "chunks": [
     {
       "marker": "[C1]",
-      "label": "e102_report.md > p.1",
-      "chunk_id": "76495df02ad44a0eb52b9ba25c13e1c6:0",
-      "document_id": "76495df02ad44a0eb52b9ba25c13e1c6",
-      "text": "Heat Exchanger E-102 Inspection Report\nDate: 2026-09-07\nAsset Tag: E-102\nMeasured wall thickness: 6.8 mm across all tube passes.",
+      "label": "heat_exchanger_e102.md > Heat Exchanger E-102 Inspection Report > p.1",
+      "chunk_id": "7cfddcc6319a4ebc8565eae765d564d9",
+      "document_id": "6e28be402c654da0be348eb7ae4a0a48",
+      "text": "Heat Exchanger E-102 Inspection Report\n\nDate: 2026-09-07\nAsset Tag: E-102\nMeasured wall thickness: 6.8 mm across all tube passes.\nOperating Pressure: 42.5 bar\nCorrosion allowance: 1.2 mm",
       "page_from": 1,
       "page_to": 1,
-      "score": 0.7682
+      "score": 0.8323
     }
   ],
   "reranked": false,
   "timings": {
-    "embed_ms": 38.4,
-    "retrieve_ms": 5.2,
+    "embed_ms": 57.7,
+    "retrieve_ms": 5.5,
     "rerank_ms": null,
-    "total_ms": 43.6
+    "total_ms": 63.2
   }
 }
 ```
