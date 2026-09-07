@@ -102,7 +102,7 @@ Access the containerized API at `http://localhost:8000/api/docs`.
 ## Repository Map
 
 ```text
-Soverign_Workbench/
+Sovereign-Workbench/
 ├── apps/
 │   ├── api/                        # FastAPI Backend Application
 │   │   ├── vajra/
@@ -136,8 +136,8 @@ Soverign_Workbench/
 
 ## Documentation
 
-* **[System Architecture & Blueprint](file:///c:/Projects/Soverign_Workbench/docs/ARCHITECTURE.md)**: Master architecture specification and component blueprint for SIH PS 26117.
-* **[Frontend API Reference](file:///c:/Projects/Soverign_Workbench/docs/API_REFERENCE.md)**: Complete REST and real-time SSE event contract for frontend engineers.
-* **[Frontend Application Specification](file:///c:/Projects/Soverign_Workbench/docs/FRONTEND_SPECIFICATION.md)**: Next.js frontend architecture, design tokens, and screen specifications.
-* **[Testing & Setup Guide](file:///c:/Projects/Soverign_Workbench/docs/TESTING_AND_SETUP.md)**: Commands for testing endpoints, RAG ingestion, and model pluggability.
-* **[Implementation Status](file:///c:/Projects/Soverign_Workbench/docs/IMPLEMENTATION_STATUS.md)**: Subsystem implementation matrix and verification metrics.
+* **[System Architecture & Blueprint](file:///c:/Projects/Sovereign-Workbench/docs/ARCHITECTURE.md)**: Master architecture specification and component blueprint for SIH PS 26117.
+* **[Frontend API Reference](file:///c:/Projects/Sovereign-Workbench/docs/API_REFERENCE.md)**: Complete REST and real-time SSE event contract for frontend engineers.
+* **[Frontend Application Specification](file:///c:/Projects/Sovereign-Workbench/docs/FRONTEND_SPECIFICATION.md)**: Next.js frontend architecture, design tokens, and screen specifications.
+* **[Testing & Setup Guide](file:///c:/Projects/Sovereign-Workbench/docs/TESTING_AND_SETUP.md)**: Commands for testing endpoints, RAG ingestion, and model pluggability.
+* **[Implementation Status](file:///c:/Projects/Sovereign-Workbench/docs/IMPLEMENTATION_STATUS.md)**: Subsystem implementation matrix and verification metrics.

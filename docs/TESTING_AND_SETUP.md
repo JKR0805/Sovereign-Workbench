@@ -29,7 +29,7 @@ Follow these exact steps to run the backend natively in an isolated virtual envi
 Open PowerShell (Windows) or Terminal (Linux/macOS):
 ```powershell
 # Navigate to the API workspace directory
-cd c:\Projects\Soverign_Workbench\apps\api
+cd c:\Projects\Sovereign-Workbench\apps\api
 ```
 
 ### Step 2: Create & Activate Virtual Environment
@@ -127,7 +127,7 @@ VAJRA supports both embedded and daemon vector storage:
 
 ## 5. Starting the VAJRA API Server
 
-From `c:\Projects\Soverign_Workbench\apps\api`:
+From `c:\Projects\Sovereign-Workbench\apps\api`:
 ```powershell
 .\.venv\Scripts\python -m vajra.main
 ```
@@ -316,7 +316,7 @@ Invoke-RestMethod -Uri "http://127.0.0.1:8000/api/knowledge/documents/$docId" -M
 If you prefer running the entire system in isolated Docker containers:
 
 ### Step 1: Start Services
-From the repository root (`c:\Projects\Soverign_Workbench`):
+From the repository root (`c:\Projects\Sovereign-Workbench`):
 ```powershell
 docker compose -f infra/docker-compose.yml up --build -d
 ```

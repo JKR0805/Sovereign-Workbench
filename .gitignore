@@ -34,7 +34,11 @@ env/
 htmlcov/
 
 # Local database & state
-data/
+data/**
+!data/**/
+!data/**/.gitkeep
+apps/api/data/
+*.lock
 *.db
 *.sqlite
 *.sqlite3

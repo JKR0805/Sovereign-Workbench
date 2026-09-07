@@ -76,7 +76,7 @@ All 53 unit and integration tests pass with zero failures:
 ```
 ============================= test session starts =============================
 platform win32 -- Python 3.14.6, pytest-9.1.1, pluggy-1.6.0
-rootdir: C:\Projects\Soverign_Workbench\apps\api
+rootdir: C:\Projects\Sovereign-Workbench\apps\api
 configfile: pyproject.toml
 testpaths: tests
 plugins: anyio-4.15.1, asyncio-1.4.0
@@ -111,7 +111,7 @@ All checks passed!
 ### Step 1: Navigate to the API Workspace
 Open your terminal (PowerShell, Command Prompt, or Bash) and navigate to the backend directory:
 ```powershell
-cd c:\Projects\Soverign_Workbench\apps\api
+cd c:\Projects\Sovereign-Workbench\apps\api
 ```
 
 ### Step 2: Python Virtual Environment Setup
@@ -169,7 +169,7 @@ Verify that all unit and integration tests pass cleanly in your environment:
      ```
 
 ### Step 6: Launch the VAJRA API Server
-From `c:\Projects\Soverign_Workbench\apps\api`:
+From `c:\Projects\Sovereign-Workbench\apps\api`:
 ```powershell
 .\.venv\Scripts\python -m vajra.main
 ```
