@@ -1,0 +1,26 @@
+:root {
+  /* Surfaces */
+  --bg-base:        #0A0C10; /* Deep canvas background */
+  --bg-panel:       #11141A; /* Primary panels and sidebars */
+  --bg-elevated:    #171B22; /* Cards, popovers, dropdowns */
+
+  /* Borders */
+  --border:         #232833; /* Standard card/panel border */
+  --border-strong:  #2E3542; /* Focused, hovered, or active border */
+
+  /* Typography */
+  --text-primary:   #E6EAF2; /* Headings and active values */
+  --text-secondary: #8B94A6; /* Body text and field labels */
+  --text-tertiary:  #5A6376; /* Placeholder text and muted metadata */
+
+  /* Accent & Semantic States */
+  --accent:         #4DA3FF; /* Single primary accent: selection and active nodes */
+  --ok:             #35C08A; /* Success, healthy, verified */
+  --warn:           #E0A32E; /* Degraded, warning, unverified */
+  --error:          #E5484D; /* Egress blocked, failed, unhealthy */
+
+  /* Modality Tints (used only on capability chips) */
+  --vision:         #A78BFA;
+  --coding:         #4DD4AC;
+  --reasoning:      #4DA3FF;
+}
