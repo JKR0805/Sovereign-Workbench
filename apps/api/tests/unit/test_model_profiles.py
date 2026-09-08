@@ -18,7 +18,7 @@ from vajra.store.repositories.registry import RegistryRepository
 
 def test_load_all_declarative_profiles() -> None:
     """All declarative hardware profiles in config/models/ must parse and validate."""
-    for profile_name in ("laptop-8gb", "mid-16gb", "high-perf-24gb"):
+    for profile_name in ("laptop-8gb", "laptop-qwen25", "mid-16gb", "high-perf-24gb"):
         profile = load_profile(profile_name)
         assert isinstance(profile, HardwareProfileConfig)
         assert profile.hardware.profile == profile_name
@@ -29,6 +29,22 @@ def test_load_all_declarative_profiles() -> None:
             assert model.role
             assert model.context_window > 0
             assert isinstance(model.capabilities, dict)
+
+
+def test_laptop_qwen25_profile_constraints() -> None:
+    """Verify lightweight constraints on the laptop-qwen25 profile."""
+    profile = load_profile("laptop-qwen25")
+    assert profile.hardware.profile == "laptop-qwen25"
+    assert profile.hardware.max_loaded_models == 1
+    assert profile.hardware.preferred_embedding_device == "cpu"
+
+    model_map = {m.id: m for m in profile.models}
+    assert "general-qwen25-3b" in model_map
+    assert model_map["general-qwen25-3b"].runtime_model_id == "qwen2.5:3b"
+    assert model_map["general-qwen25-3b"].priority == 75
+    assert model_map["general-qwen25-3b"].vram_gb == 2.2
+    assert model_map["coding-specialist"].priority == 80
+
 
 
 def test_laptop_8gb_profile_constraints() -> None:

@@ -1,11 +1,13 @@
-# VAJRA Hardware-Aware Model Profile: Laptop 8GB (Primary Development & Stage Rehearsal)
-# Section V: Bounded by 8.0 GB physical VRAM, ~6.7 GB usable, single-resident execution.
+# VAJRA Hardware-Aware Model Profile: Laptop Qwen 2.5 (Low VRAM / Constrained Execution)
+# Section V: Bounded for 4.0 - 6.0 GB physical VRAM systems or constrained 8GB setups.
+# Prioritizes Qwen 2.5 3B (2.2 GB VRAM) for lightweight general reasoning and
+# offers both 3B and 7B coding specialists.
 
 hardware:
-  profile: laptop-8gb
-  description: "Constrained 8GB laptop GPU (e.g. RTX 3070/4060 Laptop). Single generative model resident in VRAM at a time."
-  vram_mb: 8192
-  max_usable_vram_mb: 6860
+  profile: laptop-qwen25
+  description: "Constrained 4GB-8GB laptop GPU (e.g. GTX 1650/1660, RTX 3050/4050 Laptop, or thin-and-light setups). Prioritizes Qwen 2.5 3B for minimal VRAM footprint (2.2 GB) with single-resident execution."
+  vram_mb: 6144
+  max_usable_vram_mb: 5120
   max_loaded_models: 1
   keep_alive: 30m
   preferred_embedding_device: cpu
@@ -16,23 +18,48 @@ runtime:
   base_url: http://127.0.0.1:11434
 
 models:
-  - id: general-reasoning
-    display_name: "Qwen 3 8B"
+  - id: general-qwen25-3b
+    display_name: "Qwen 2.5 3B"
     role: general
     runtime_id: ollama
-    runtime_model_id: qwen3:8b
+    runtime_model_id: qwen2.5:3b
     capabilities:
       text: 0.90
       reasoning: 0.85
+      coding: 0.85
+      tool_calling: 0.85
+      structured_output: 0.85
     context_window: 8192
     max_output_tokens: 2048
     num_ctx: 8192
     device: gpu
-    vram_gb: 5.2
+    vram_gb: 2.2
     quantization: Q4_K_M
     modalities_in:
       - text
-    priority: 85
+    priority: 75
+    enabled: true
+    license: apache-2.0
+
+  - id: coding-qwen25-3b
+    display_name: "Qwen 2.5 Coder 3B"
+    role: coding
+    runtime_id: ollama
+    runtime_model_id: qwen2.5-coder:3b
+    capabilities:
+      text: 0.85
+      coding: 0.90
+      tool_calling: 0.85
+      structured_output: 0.85
+    context_window: 8192
+    max_output_tokens: 2048
+    num_ctx: 8192
+    device: gpu
+    vram_gb: 2.2
+    quantization: Q4_K_M
+    modalities_in:
+      - text
+    priority: 82
     enabled: true
     license: apache-2.0
 
@@ -54,7 +81,27 @@ models:
     quantization: Q4_K_M
     modalities_in:
       - text
-    priority: 75
+    priority: 80
+    enabled: true
+    license: apache-2.0
+
+  - id: general-reasoning
+    display_name: "Qwen 3 8B"
+    role: general
+    runtime_id: ollama
+    runtime_model_id: qwen3:8b
+    capabilities:
+      text: 0.90
+      reasoning: 0.85
+    context_window: 8192
+    max_output_tokens: 2048
+    num_ctx: 8192
+    device: gpu
+    vram_gb: 5.2
+    quantization: Q4_K_M
+    modalities_in:
+      - text
+    priority: 60
     enabled: true
     license: apache-2.0
 
