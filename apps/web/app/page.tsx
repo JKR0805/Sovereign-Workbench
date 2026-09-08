@@ -423,29 +423,22 @@ export default function WorkbenchPage() {
     };
     setAttachedFile(item);
 
-    if (isImg) {
-      const reader = new FileReader();
-      reader.onload = (ev) => {
-        const dataUrl = ev.target?.result as string;
-        setAttachedFile((prev) =>
-          prev && prev.file === file
-            ? { ...prev, previewUrl: dataUrl, dataBase64: dataUrl.split(';base64,')[1] || dataUrl }
-            : prev
-        );
-      };
-      reader.readAsDataURL(file);
-      api
-        .uploadDocument(file)
-        .then((doc) => {
-          setAttachedFile((prev) =>
-            prev && prev.file === file ? { ...prev, documentId: doc.id } : prev
-          );
-        })
-        .catch((err) => {
-          console.warn('Image upload persistence notice:', err);
-        });
-      return;
-    }
+    // Always read base64 in background as resilient fallback
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const dataUrl = ev.target?.result as string;
+      const b64 = dataUrl.split(';base64,')[1] || dataUrl;
+      setAttachedFile((prev) =>
+        prev && prev.file === file
+          ? {
+              ...prev,
+              previewUrl: isImg ? dataUrl : prev.previewUrl,
+              dataBase64: b64,
+            }
+          : prev
+      );
+    };
+    reader.readAsDataURL(file);
 
     if (isTxt) {
       const textReader = new FileReader();
@@ -458,12 +451,11 @@ export default function WorkbenchPage() {
       textReader.readAsText(file.slice(0, 131072)); // Read up to 128KB for text preview
     }
 
-    // Non-image attachments are uploaded immediately (path A: pre-uploaded,
-    // scoped by document_id) rather than inlined as base64 at send time
+    // Pre-upload to Knowledge Base (path A)
     try {
       const doc = await api.uploadDocument(file);
       setAttachedFile((prev) =>
-        prev && prev.file === file ? { ...prev, uploading: false, documentId: doc.id } : prev
+        prev && prev.file === file ? { ...prev, uploading: false, documentId: doc.id, uploadError: undefined } : prev
       );
     } catch (err) {
       setAttachedFile((prev) =>
@@ -1038,7 +1030,19 @@ export default function WorkbenchPage() {
                     <span className="text-ok font-semibold">· Indexed</span>
                   )}
                   {attachedFile.uploadError && (
-                    <span className="text-error font-semibold">· {attachedFile.uploadError}</span>
+                    <span className="text-error font-semibold flex items-center gap-1">
+                      · {attachedFile.uploadError}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (attachedFile.file) handleFile(attachedFile.file);
+                        }}
+                        className="underline text-accent hover:text-accent-hover ml-1 cursor-pointer font-normal"
+                      >
+                        Retry
+                      </button>
+                    </span>
                   )}
                 </div>
               </div>

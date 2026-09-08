@@ -56,15 +56,21 @@ class FastEmbedEmbedder:
             ) from exc
 
         logger.info("Initializing FastEmbed model: %s on %s", self.model, self.device)
-        self._embedding_model = TextEmbedding(model_name=self.model)
+        self._embedding_model = TextEmbedding(model_name=self.model, threads=4)
         return self._embedding_model
 
     async def embed_chunks(self, chunks: Sequence[Chunk]) -> list[EmbeddingVector]:
         if not chunks:
             return []
+        import anyio
+
         model = self._get_model()
         texts = [chunk.embed_text for chunk in chunks]
-        embeddings = list(model.embed(texts))
+
+        def _do_embed() -> list[Any]:
+            return list(model.embed(texts, batch_size=32))
+
+        embeddings = await anyio.to_thread.run_sync(_do_embed)
         return [
             EmbeddingVector(
                 chunk_id=chunk.id,
@@ -75,12 +81,16 @@ class FastEmbedEmbedder:
         ]
 
     async def embed_query(self, query: str) -> EmbeddingVector:
-        model = self._get_model()
-        if hasattr(model, "query_embed"):
-            emb = next(model.query_embed(query))
-        else:
-            emb = next(iter(model.embed([query])))
+        import anyio
 
+        model = self._get_model()
+
+        def _do_embed_query() -> Any:
+            if hasattr(model, "query_embed"):
+                return next(model.query_embed(query))
+            return next(iter(model.embed([query], batch_size=1)))
+
+        emb = await anyio.to_thread.run_sync(_do_embed_query)
         return EmbeddingVector(
             chunk_id="",
             dense=[round(float(x), 6) for x in emb],

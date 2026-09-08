@@ -18,6 +18,7 @@ from vajra.core.exceptions import InfrastructureUnavailable, NotImplementedYet
 from vajra.rag.models import BBox, Block, BlockType, ExtractedDocument, PageClassification, PageKind
 
 HEADING_PATTERN = re.compile(r"^(#{1,6})\s+(.+)$")
+BULLET_PREFIX_PATTERN = re.compile(r"^[\s\u2022\u25cf\u25cb\ufffd\u25aa\u25b6\-\*·▪▫►–—\d+\.\)]+\s*")
 
 #: A markdown table row: at least one pipe with content on both sides.
 TABLE_ROW_PATTERN = re.compile(r"^\s*\|.+\|\s*$")
@@ -148,10 +149,12 @@ class PyMuPDFParser:
 
                     lines = text.splitlines()
                     first_line = lines[0].strip() if lines else ""
+                    is_bullet = bool(BULLET_PREFIX_PATTERN.match(first_line))
                     is_heading = (
                         len(lines) == 1
-                        and len(first_line) < 80
-                        and not first_line.endswith((".", ":", ";"))
+                        and 3 < len(first_line) < 80
+                        and not first_line.endswith((".", ":", ";", ",", "|", "-"))
+                        and not is_bullet
                     )
 
                     block_type = BlockType.HEADING if is_heading else BlockType.PARAGRAPH
