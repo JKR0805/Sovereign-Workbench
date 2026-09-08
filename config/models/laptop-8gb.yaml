@@ -16,6 +16,29 @@ runtime:
   base_url: http://127.0.0.1:11434
 
 models:
+  - id: general-qwen25-3b
+    display_name: "Qwen 2.5 3B"
+    role: general
+    runtime_id: ollama
+    runtime_model_id: qwen2.5:3b
+    capabilities:
+      text: 0.90
+      reasoning: 0.85
+      coding: 0.85
+      tool_calling: 0.85
+      structured_output: 0.85
+    context_window: 8192
+    max_output_tokens: 2048
+    num_ctx: 8192
+    device: gpu
+    vram_gb: 2.2
+    quantization: Q4_K_M
+    modalities_in:
+      - text
+    priority: 75
+    enabled: true
+    license: apache-2.0
+
   - id: general-reasoning
     display_name: "Qwen 3 8B"
     role: general

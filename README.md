@@ -41,11 +41,27 @@
 
 ## Quick Start (Local Setup)
 
-### 1. Set Up Virtual Environment
+### 1. Start Local LLM Inference (Ollama)
+Ensure **Ollama** is running locally for LLM inference:
 ```powershell
+ollama serve
+
+# In another terminal, pull recommended models
+ollama pull qwen2.5:7b
+ollama pull nomic-embed-text:latest
+```
+*(Vector database requires zero setup: VAJRA automatically initializes embedded local on-disk Qdrant at `data/qdrant` if no external server is running).*
+
+---
+
+### 2. Run Backend (FastAPI)
+Open a terminal and navigate to `apps/api`:
+
+```powershell
+# 1. Navigate to api directory
 cd apps\api
 
-# Create & activate virtual environment
+# 2. Create & activate virtual environment (if not already done)
 python -m venv .venv
 
 # On Windows PowerShell:
@@ -54,37 +70,49 @@ python -m venv .venv
 # On Linux / macOS:
 source .venv/bin/activate
 
-# Install dependencies in editable mode
+# 3. Install backend dependencies in editable mode
 pip install -e .
-```
 
-### 2. Run Tests & Validation
-```powershell
-# Run the 53-test suite
-pytest -v
-
-# Run linter
-ruff check .
-```
-
-### 3. Start Local Services
-Ensure **Ollama** is running locally for LLM inference:
-```powershell
-ollama serve
-
-# In another terminal, pull recommended models
-ollama pull qwen3:8b
-ollama pull nomic-embed-text:latest
-```
-*(Vector database requires zero setup: VAJRA automatically initializes embedded local on-disk Qdrant at `data/qdrant` if no external server is running).*
-
-### 4. Launch Backend API
-```powershell
+# 4. Launch Backend API
 python -m vajra.main
+# (or: uvicorn vajra.main:app --reload)
 ```
+
 * **Interactive Swagger UI**: [http://127.0.0.1:8000/api/docs](http://127.0.0.1:8000/api/docs)
 * **API Health & Sovereignty Audit**: [http://127.0.0.1:8000/api/system/health](http://127.0.0.1:8000/api/system/health)
 * **Registered Hardware Models**: [http://127.0.0.1:8000/api/models](http://127.0.0.1:8000/api/models)
+
+#### Backend Validation & Tests
+```powershell
+cd apps\api
+.\.venv\Scripts\Activate.ps1
+pytest -v          # Run 53-test suite
+ruff check .       # Run linter
+```
+
+---
+
+### 3. Run Frontend (Next.js)
+Open a **new separate terminal**:
+
+#### Option A: From root directory
+```powershell
+# Run Next.js dev server directly from workspace root
+npm run dev
+```
+
+#### Option B: From `apps/web` directory
+```powershell
+cd apps\web
+
+# Install frontend dependencies (if not already installed)
+npm install
+
+# Start Next.js development server
+npm run dev
+```
+
+* **Frontend UI**: [http://localhost:3000](http://localhost:3000)
 
 ---
 
@@ -136,8 +164,8 @@ Sovereign-Workbench/
 
 ## Documentation
 
-* **[System Architecture & Blueprint](file:///c:/Projects/Sovereign-Workbench/docs/ARCHITECTURE.md)**: Master architecture specification and component blueprint for SIH PS 26117.
-* **[Frontend API Reference](file:///c:/Projects/Sovereign-Workbench/docs/API_REFERENCE.md)**: Complete REST and real-time SSE event contract for frontend engineers.
-* **[Frontend Application Specification](file:///c:/Projects/Sovereign-Workbench/docs/FRONTEND_SPECIFICATION.md)**: Next.js frontend architecture, design tokens, and screen specifications.
-* **[Testing & Setup Guide](file:///c:/Projects/Sovereign-Workbench/docs/TESTING_AND_SETUP.md)**: Commands for testing endpoints, RAG ingestion, and model pluggability.
-* **[Implementation Status](file:///c:/Projects/Sovereign-Workbench/docs/IMPLEMENTATION_STATUS.md)**: Subsystem implementation matrix and verification metrics.
+* **[System Architecture & Blueprint](docs/ARCHITECTURE.md)**: Master architecture specification and component blueprint for SIH PS 26117.
+* **[Frontend API Reference](docs/API_REFERENCE.md)**: Complete REST and real-time SSE event contract for frontend engineers.
+* **[Frontend Application Specification](docs/FRONTEND_SPECIFICATION.md)**: Next.js frontend architecture, design tokens, and screen specifications.
+* **[Testing & Setup Guide](docs/TESTING_AND_SETUP.md)**: Commands for testing endpoints, RAG ingestion, and model pluggability.
+* **[Implementation Status](docs/IMPLEMENTATION_STATUS.md)**: Subsystem implementation matrix and verification metrics.

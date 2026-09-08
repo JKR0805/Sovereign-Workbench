@@ -231,30 +231,48 @@ class PyMuPDFParser:
 
     async def _parse_tabular(self, path: Path, *, document_id: str, title: str) -> ExtractedDocument:
         import anyio
-        import pandas as pd
+        import csv
 
         suffix = path.suffix.lower()
 
-        def _read_df() -> pd.DataFrame:
-            if suffix in (".xlsx", ".xls"):
-                return pd.read_excel(path)
-            if suffix == ".tsv":
-                return pd.read_csv(path, sep="\t")
-            return pd.read_csv(path)
+        def _read_data() -> tuple[list[str], list[list[str]], str, str]:
+            try:
+                import pandas as pd
 
-        df = await anyio.to_thread.run_sync(_read_df)
+                if suffix in (".xlsx", ".xls"):
+                    df = pd.read_excel(path)
+                elif suffix == ".tsv":
+                    df = pd.read_csv(path, sep="\t")
+                else:
+                    df = pd.read_csv(path)
 
-        schema_items = [f"{col} ({dtype})" for col, dtype in zip(df.columns, df.dtypes)]
-        schema_str = ", ".join(schema_items)
+                header = [str(c) for c in df.columns]
+                rows = [[str(val) for val in row] for row in df.values]
+                schema_items = [f"{col} ({dtype})" for col, dtype in zip(df.columns, df.dtypes)]
+                schema_str = ", ".join(schema_items)
+                try:
+                    stats_str = df.describe(include="all").fillna("").to_string()
+                except Exception:
+                    stats_str = "Statistics calculation not applicable for non-numeric data."
+                return header, rows, schema_str, stats_str
+            except ImportError:
+                delimiter = "\t" if suffix == ".tsv" else ","
+                with path.open("r", encoding="utf-8", errors="replace") as f:
+                    reader = list(csv.reader(f, delimiter=delimiter))
+                if not reader:
+                    return [], [], "empty", "No data"
+                header = [str(c).strip() for c in reader[0]]
+                rows = [[str(val).strip() for val in row] for row in reader[1:] if row]
+                schema_items = [f"{col} (string)" for col in header]
+                schema_str = ", ".join(schema_items)
+                stats_str = f"Columns: {len(header)}, Rows: {len(rows)}"
+                return header, rows, schema_str, stats_str
 
-        try:
-            stats_str = df.describe(include="all").fillna("").to_string()
-        except Exception:
-            stats_str = "Statistics calculation not applicable for non-numeric data."
+        header, rows, schema_str, stats_str = await anyio.to_thread.run_sync(_read_data)
 
         summary_text = (
             f"### Tabular Schema & Statistics ({path.name})\n"
-            f"- **Rows**: {len(df)}, **Columns**: {len(df.columns)}\n"
+            f"- **Rows**: {len(rows)}, **Columns**: {len(header)}\n"
             f"- **Schema**: {schema_str}\n"
             f"- **Summary Statistics**:\n```\n{stats_str}\n```"
         )
@@ -262,10 +280,6 @@ class PyMuPDFParser:
         blocks: list[Block] = [
             Block(text=summary_text, type=BlockType.PARAGRAPH, page=1)
         ]
-
-        # Convert dataframe rows into chunked markdown table blocks
-        header = [str(c) for c in df.columns]
-        rows = [[str(val) for val in row] for row in df.values]
 
         for start in range(0, len(rows), CSV_ROWS_PER_BLOCK):
             batch = rows[start : start + CSV_ROWS_PER_BLOCK]
@@ -280,8 +294,8 @@ class PyMuPDFParser:
             blocks=blocks,
             pages=pages,
             parser="tabular",
-            summary=f"Tabular file ({len(df)} rows, {len(df.columns)} columns). Schema: {schema_str}",
-            metadata={"rows": len(df), "columns": len(df.columns), "schema": schema_str},
+            summary=f"Tabular file ({len(rows)} rows, {len(header)} columns). Schema: {schema_str}",
+            metadata={"rows": len(rows), "columns": len(header), "schema": schema_str},
         )
 
     async def _parse_docx(self, path: Path, *, document_id: str, title: str) -> ExtractedDocument:
