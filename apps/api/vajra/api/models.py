@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
-from typing import Annotated
+import json
+import time
+from collections.abc import AsyncIterator
+from typing import Annotated, cast
 
 from fastapi import APIRouter, Query, status
-from pydantic import BaseModel
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field
 
 from vajra.core.dependencies import Context
 from vajra.core.enums import Capability
@@ -18,8 +22,11 @@ from vajra.registry.models import (
     ProbeReport,
     ResidencyReport,
 )
+from vajra.runtimes.base import ChatMessage, ChatRequest, ChatRole, RuntimeAdapter
 
 router = APIRouter(prefix="/api/models", tags=["models"])
+
+_CHAT_ROLES = frozenset({"system", "user", "assistant", "tool"})
 
 
 class ProbeRequest(BaseModel):
@@ -109,3 +116,95 @@ async def load_model(model_id: str, context: Context) -> None:
 @router.post("/{model_id}/unload", status_code=status.HTTP_204_NO_CONTENT)
 async def unload_model(model_id: str, context: Context) -> None:
     await context.registry.unload(model_id)
+
+
+class ChatMessagePayload(BaseModel):
+    role: str = "user"
+    content: str
+    images: list[str] = Field(default_factory=list)
+
+
+class ModelChatRequest(BaseModel):
+    messages: list[ChatMessagePayload]
+    temperature: float | None = 0.7
+    stream: bool = False
+
+
+class ModelChatResponse(BaseModel):
+    model_id: str
+    runtime_model_id: str
+    reply: str
+    prompt_tokens: int | None
+    completion_tokens: int | None
+    tokens_measured: bool
+    duration_ms: float
+
+
+async def _stream_chat(
+    adapter: RuntimeAdapter, chat_request: ChatRequest
+) -> AsyncIterator[str]:
+    async for chunk in adapter.chat(chat_request):
+        if chunk.delta:
+            yield f"data: {json.dumps({'text': chunk.delta})}\n\n"
+    yield "data: [DONE]\n\n"
+
+
+@router.post("/{model_id}/chat", response_model=None)
+async def chat_with_model(
+    model_id: str,
+    body: ModelChatRequest,
+    context: Context,
+) -> StreamingResponse | ModelChatResponse:
+    """Direct conversation with a registered model via its runtime adapter."""
+    record = await context.registry.get(model_id)
+    adapter = await context.runtimes.adapter(record.runtime_id)
+
+    chat_request = ChatRequest(
+        model=record.runtime_model_id,
+        messages=[
+            ChatMessage(
+                role=cast(
+                    "ChatRole", message.role if message.role in _CHAT_ROLES else "user"
+                ),
+                content=message.content,
+                images=message.images,
+            )
+            for message in body.messages
+        ],
+        temperature=body.temperature,
+        stream=body.stream,
+    )
+
+    if body.stream:
+        return StreamingResponse(
+            _stream_chat(adapter, chat_request),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
+    started = time.perf_counter()
+    chunks: list[str] = []
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
+    async for chunk in adapter.chat(chat_request):
+        if chunk.delta:
+            chunks.append(chunk.delta)
+        if chunk.prompt_tokens is not None:
+            prompt_tokens = chunk.prompt_tokens
+        if chunk.completion_tokens is not None:
+            completion_tokens = chunk.completion_tokens
+    duration_ms = (time.perf_counter() - started) * 1000
+
+    return ModelChatResponse(
+        model_id=model_id,
+        runtime_model_id=record.runtime_model_id,
+        reply="".join(chunks),
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        tokens_measured=prompt_tokens is not None or completion_tokens is not None,
+        duration_ms=duration_ms,
+    )

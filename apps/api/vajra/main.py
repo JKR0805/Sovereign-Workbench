@@ -107,10 +107,9 @@ def create_app() -> FastAPI:
         )
 
     # --- routers ---------------------------------------------------------
-    from vajra.api import all_routers
+    from vajra.api import register_all_routers
 
-    for router in all_routers:
-        app.include_router(router)
+    register_all_routers(app)
 
     return app
 

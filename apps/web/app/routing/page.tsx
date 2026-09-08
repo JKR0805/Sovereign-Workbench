@@ -1,9 +1,8 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { api, useIsMock } from '../../lib/api';
-import { SimulateResponse, RoutingPolicy } from '../../lib/types';
-import { MockBadge } from '../../components/primitives/MockBadge';
+import { api } from '../../lib/api';
+import type { PolicyRead, ScoringWeights, SimulateResponse } from '../../lib/types';
 import {
   Sliders,
   Play,
@@ -16,29 +15,31 @@ import {
   Save
 } from 'lucide-react';
 
+const DEFAULT_WEIGHTS: ScoringWeights = {
+  capability: 0.4,
+  preferred: 0.15,
+  context: 0.1,
+  latency: 0.1,
+  priority: 0.1,
+  residency: 0.1,
+  reliability: 0.05,
+};
+
 export default function RoutingStudioPage() {
-  const isRoutingMock = useIsMock('routing');
   const [prompt, setPrompt] = useState(
     'Review this heat exchanger inspection report and verify if wall thickness complies with ASME safety limits.'
   );
 
-  const [policies, setPolicies] = useState<RoutingPolicy[]>([]);
-  const [selectedPolicyId, setSelectedPolicyId] = useState<string>('default-institutional');
+  const [policies, setPolicies] = useState<PolicyRead[]>([]);
+  const [selectedPolicy, setSelectedPolicy] = useState<PolicyRead | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
-  // 7 Scoring Weights matching FRONTEND_SPECIFICATION.md Section 4.5
-  const [weights, setWeights] = useState({
-    capability: 0.40,
-    preferred: 0.15,
-    context: 0.10,
-    latency: 0.10,
-    priority: 0.10,
-    residency: 0.10,
-    reliability: 0.05,
-  });
+  const [weights, setWeights] = useState<ScoringWeights>(DEFAULT_WEIGHTS);
 
   const [simResult, setSimResult] = useState<SimulateResponse | null>(null);
+  const [simError, setSimError] = useState<string | null>(null);
   const [simulating, setSimulating] = useState(false);
 
   useEffect(() => {
@@ -49,39 +50,44 @@ export default function RoutingStudioPage() {
     try {
       const list = await api.getRoutingPolicies();
       setPolicies(list);
-      if (list.length > 0 && list[0].weights) {
-        setWeights(list[0].weights);
+      if (list.length > 0) {
+        setSelectedPolicy(list[0]);
+        setWeights({ ...DEFAULT_WEIGHTS, ...(list[0].weights as Partial<ScoringWeights>) });
       }
     } catch (err) {
-      console.error(err);
+      setLoadError(err instanceof Error ? err.message : 'Failed to load policies.');
     }
   };
 
   const handleSimulate = async () => {
     setSimulating(true);
+    setSimError(null);
     try {
-      const res = await api.simulateRouting({
-        prompt,
-        weights,
-      });
+      const res = await api.simulateRouting({ prompt, weights });
       setSimResult(res);
     } catch (err) {
-      console.error(err);
+      setSimError(err instanceof Error ? err.message : 'Simulation failed.');
     } finally {
       setSimulating(false);
     }
   };
 
   const handleSavePolicy = async () => {
+    if (!selectedPolicy) return;
     setSaving(true);
     try {
-      await api.saveRoutingPolicy(selectedPolicyId, {
-        weights,
+      await api.saveRoutingPolicy(selectedPolicy.id, {
+        name: selectedPolicy.name,
+        enabled: selectedPolicy.enabled,
+        priority: selectedPolicy.priority,
+        graph: selectedPolicy.graph,
+        rules: selectedPolicy.rules,
+        weights: { ...weights },
       });
       setSaveMessage('Policy weights successfully persisted');
       setTimeout(() => setSaveMessage(null), 3000);
     } catch (err) {
-      console.error(err);
+      setSaveMessage(err instanceof Error ? `Save failed: ${err.message}` : 'Save failed.');
     } finally {
       setSaving(false);
     }
@@ -92,14 +98,9 @@ export default function RoutingStudioPage() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-border pb-4">
         <div>
-          <div className="flex items-center gap-2.5">
-            <h1 className="text-xl font-bold tracking-tight text-text-primary">
-              Routing Studio
-            </h1>
-            {isRoutingMock && <MockBadge label="Mock Engine" size="sm" />}
-          </div>
+          <h1 className="text-xl font-bold tracking-tight text-text-primary">Routing Studio</h1>
           <p className="text-sm text-text-secondary">
-            Visual policy editor, 7-factor scoring weights tuner, and deterministic arbitration simulator
+            7-factor scoring weights tuner and deterministic arbitration simulator
           </p>
         </div>
 
@@ -123,6 +124,10 @@ export default function RoutingStudioPage() {
           </button>
         </div>
       </div>
+
+      {loadError && (
+        <div className="p-3 rounded-md bg-error/10 border border-error/30 text-error text-xs font-mono">{loadError}</div>
+      )}
 
       {saveMessage && (
         <div className="p-3 rounded-md bg-ok-muted border border-ok/30 text-ok text-xs font-mono flex items-center gap-2 animate-in fade-in duration-150">
@@ -171,23 +176,41 @@ export default function RoutingStudioPage() {
 
                 {simResult && i === 2 && (
                   <span className="font-mono text-xs font-bold text-accent px-2 py-0.5 rounded bg-accent/15 border border-accent/30">
-                    Winner: {simResult.decision.selected} ({simResult.decision.score})
+                    Winner: {simResult.decision.selected} ({simResult.decision.score.toFixed(1)})
                   </span>
                 )}
               </div>
             ))}
           </div>
 
-          {/* Simulation Output Card */}
+          {simError && <div className="mt-4 p-3 rounded bg-error/10 border border-error/30 text-error text-xs font-mono">{simError}</div>}
+
           {simResult && (
-            <div className="mt-4 p-3 bg-bg-elevated border border-accent/40 rounded text-xs font-mono flex flex-col gap-1.5 animate-in fade-in duration-200">
+            <div className="mt-4 p-3 bg-bg-elevated border border-accent/40 rounded text-xs font-mono flex flex-col gap-2 animate-in fade-in duration-200">
               <div className="flex justify-between text-accent font-bold">
                 <span>Decision Rationale:</span>
-                <span>Latency: {simResult.decision.decided_in_ms}ms</span>
+                <span>Latency: {simResult.decision.decided_in_ms.toFixed(1)}ms</span>
               </div>
-              <p className="font-sans text-text-secondary">
-                {simResult.decision.rationale}
-              </p>
+              <p className="font-sans text-text-secondary">{simResult.decision.rationale}</p>
+              {simResult.decision.candidates.length > 0 && (
+                <div className="flex flex-col gap-1 pt-1 border-t border-border/50">
+                  {simResult.decision.candidates.map((c) => (
+                    <div key={c.model_id} className="flex justify-between text-text-secondary">
+                      <span className={c.model_id === simResult.decision.selected ? 'text-accent font-bold' : ''}>{c.model_id}</span>
+                      <span>{c.total.toFixed(1)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {simResult.decision.rejected.length > 0 && (
+                <div className="flex flex-col gap-1 pt-1 border-t border-border/50">
+                  {simResult.decision.rejected.map((r) => (
+                    <div key={r.model_id} className="text-error">
+                      {r.model_id}: {r.detail}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>

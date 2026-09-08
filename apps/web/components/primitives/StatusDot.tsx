@@ -5,6 +5,7 @@ interface StatusDotProps {
     | 'healthy'
     | 'degraded'
     | 'unhealthy'
+    | 'unknown'
     | 'running'
     | 'stopped'
     | 'analyzed'
@@ -12,14 +13,19 @@ interface StatusDotProps {
     | 'processing'
     | 'online'
     | 'indexed'
-    | 'failed';
+    | 'failed'
+    | 'pending'
+    | 'parsing'
+    | 'chunking'
+    | 'embedding'
+    | 'skipped';
   pulse?: boolean;
   size?: 'sm' | 'md';
 }
 
 export const StatusDot: React.FC<StatusDotProps> = ({ status, pulse = false, size = 'md' }) => {
   let bg = 'bg-ok';
-  let label = 'Healthy';
+  let label: string = status;
 
   switch (status) {
     case 'healthy':
@@ -33,14 +39,23 @@ export const StatusDot: React.FC<StatusDotProps> = ({ status, pulse = false, siz
       break;
     case 'degraded':
     case 'processing':
+    case 'parsing':
+    case 'chunking':
+    case 'embedding':
+    case 'pending':
       bg = 'bg-[#E0A32E]';
-      label = status === 'processing' ? 'Processing' : 'Degraded';
+      label = status === 'processing' ? 'Processing' : status.charAt(0).toUpperCase() + status.slice(1);
       break;
     case 'unhealthy':
     case 'stopped':
     case 'failed':
       bg = 'bg-[#E5484D]';
       label = status === 'stopped' ? 'Stopped' : status === 'failed' ? 'Failed' : 'Unhealthy';
+      break;
+    case 'skipped':
+    case 'unknown':
+      bg = 'bg-[#5A6376]';
+      label = status === 'skipped' ? 'Skipped' : 'Unknown';
       break;
   }
 

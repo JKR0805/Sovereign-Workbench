@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -78,6 +79,9 @@ class ExtractedDocument(BaseModel):
     blocks: list[Block] = Field(default_factory=list)
     pages: list[PageClassification] = Field(default_factory=list)
     parser: str = "unknown"
+    summary: str | None = None
+    fallback_images: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
     @property
     def scanned_page_count(self) -> int:
@@ -181,6 +185,12 @@ class IngestRequest(BaseModel):
     storage_path: str
     project_id: str | None = None
     document_id: str | None = None
+    run_id: str | None = None
+    """When ingestion happens as part of a run's intake step, its progress
+    events (``PAGE_CLASSIFIED``, ``DOCUMENT_INGESTED``) are tagged with this so
+    they land on the run's own SSE stream instead of the global one -- the run
+    inspector otherwise shows an intake node with zero events while a large
+    file is still parsing."""
 
 
 class IngestResult(BaseModel):
@@ -190,3 +200,5 @@ class IngestResult(BaseModel):
     scanned_page_count: int
     parser: str
     ingested_at: datetime
+    extracted_summary: str | None = None
+    fallback_images: list[str] = Field(default_factory=list)

@@ -1,31 +1,34 @@
 """Knowledge endpoints (Section M, "Knowledge").
 
-Document upload persists the file and its metadata row. The parsing, chunking and
-embedding pipeline is scaffolded: :meth:`ingest` raises
-:class:`~vajra.core.exceptions.NotImplementedYet` because it depends on Docling
-and Qdrant, which may not be available.
+Document upload delegates to :class:`~vajra.rag.intake.AttachmentIntake`: hash,
+persist, dedupe against anything already indexed, parse, chunk, embed, index.
+The same pipeline a run's intake step uses for a chat attachment.
 
-Search similarly raises 501 when the RAG subsystem is disabled. This is
-deliberate: a search endpoint that returned an empty result would be
-indistinguishable from a query that found nothing, which is exactly the kind of
-ambiguity the plan forbids.
+Search raises 501 when the RAG subsystem is disabled. This is deliberate: a
+search endpoint that returned an empty result would be indistinguishable from
+a query that found nothing, which is exactly the kind of ambiguity the plan
+forbids.
 """
 
 from __future__ import annotations
 
-import hashlib
+import itertools
 import logging
+import re
 import shutil
-from datetime import UTC, datetime
+from collections import Counter, defaultdict
+from datetime import datetime
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal
 
-from fastapi import APIRouter, Query, UploadFile, status
+from fastapi import APIRouter, HTTPException, Query, UploadFile, status
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from vajra.core.dependencies import Context
 from vajra.core.enums import DocumentStatus
 from vajra.core.exceptions import NotFound, NotImplementedYet
+from vajra.rag.intake import IntakeDisposition
 from vajra.store.models import ChunkRecord, DocumentRecord
 from vajra.store.repositories.knowledge import KnowledgeRepository
 
@@ -130,71 +133,27 @@ async def upload_document(
     context: Context,
     project_id: Annotated[str | None, Query()] = None,
 ) -> DocumentRead:
-    """Upload a document. Persists file and metadata, and performs local ingestion."""
-    paths = context.settings.paths.resolved()
-    assert paths.uploads_dir is not None
-
+    """Upload a document. Persists it, hashes it, dedupes against anything
+    already indexed, and runs it through the same
+    :class:`~vajra.rag.intake.AttachmentIntake` pipeline a chat attachment
+    uses -- this endpoint and a run's intake step are one code path now."""
     filename = file.filename or "upload"
-    suffix = Path(filename).suffix.lower()
-    if suffix not in (".pdf", ".txt", ".md", ".csv", ".json", ".log"):
-        from fastapi import HTTPException
-
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                f"Unsupported document format: '{suffix}'. "
-                "Supported: .pdf, .txt, .md, .csv, .json, .log"
-            ),
-        )
-
     content = await file.read()
-    sha256 = hashlib.sha256(content).hexdigest()
-    mime = file.content_type or "application/octet-stream"
 
-    # Persist file to data/uploads/<sha256>/<filename>
-    upload_dir = paths.uploads_dir / sha256
-    upload_dir.mkdir(parents=True, exist_ok=True)
-    dest = upload_dir / filename
-    dest.write_bytes(content)
-
-    record = DocumentRecord(
-        project_id=project_id,
-        filename=filename,
-        sha256=sha256,
-        mime=mime,
-        size_bytes=len(content),
-        storage_path=str(dest),
-        status=DocumentStatus.PENDING,
-        created_at=datetime.now(UTC),
+    result = await context.attachment_intake.intake(
+        content, filename=filename, mime=file.content_type, project_id=project_id
     )
+
+    if result.disposition is IntakeDisposition.UNSUPPORTED:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=result.detail)
+
+    assert result.document_id is not None
     async with context.database.session() as session:
-        await KnowledgeRepository(session).add_document(record)
-
-    # Ingest if RAG is enabled
-    if context.settings.rag.enabled and context.rag_ingestor is not None:
-        from vajra.rag.models import IngestRequest
-
-        try:
-            await context.rag_ingestor.ingest(
-                IngestRequest(
-                    document_id=record.id,
-                    filename=filename,
-                    storage_path=str(dest),
-                    mime=mime,
-                ),
-                record=record,
-            )
-            async with context.database.session() as session:
-                updated = await KnowledgeRepository(session).get_document(record.id)
-                if updated is not None:
-                    record = updated
-        except Exception:
-            # DocumentIngestor marks FAILED and sets error in DB
-            async with context.database.session() as session:
-                updated = await KnowledgeRepository(session).get_document(record.id)
-                if updated is not None:
-                    record = updated
-
+        record = await KnowledgeRepository(session).get_document(result.document_id)
+    if record is None:
+        raise NotFound(
+            f"Document {result.document_id!r} does not exist", document_id=result.document_id
+        )
     return DocumentRead.from_record(record)
 
 
@@ -229,6 +188,22 @@ async def list_chunks(document_id: str, context: Context) -> list[ChunkRead]:
             )
         records = await KnowledgeRepository(session).list_chunks(document_id)
     return [ChunkRead.from_record(record) for record in records]
+
+
+@router.get("/documents/{document_id}/raw")
+async def get_raw_document(document_id: str, context: Context) -> FileResponse:
+    """Download or stream the raw document content from storage."""
+    async with context.database.session() as session:
+        record = await KnowledgeRepository(session).get_document(document_id)
+    if record is None:
+        raise NotFound(f"Document {document_id!r} does not exist", document_id=document_id)
+    if not record.storage_path or not Path(record.storage_path).exists():
+        raise NotFound(f"Raw file for document {document_id!r} not found on disk", document_id=document_id)
+    return FileResponse(
+        path=record.storage_path,
+        media_type=record.mime or "application/octet-stream",
+        filename=record.filename,
+    )
 
 
 @router.delete("/documents/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -325,3 +300,126 @@ async def search(request: SearchRequest, context: Context) -> SearchResult:
         reranked=search_result.reranked,
         timings=search_result.timings.model_dump(),
     )
+
+
+# --- knowledge graph (heuristic, not NER) ---------------------------------
+#
+# Derived from real ingested documents and chunks -- no fabricated entities.
+# "Term" nodes come from two cheap, honest regexes (equipment-tag patterns
+# like "E-102" or "TI-301", and Title Case multi-word phrases), not from a
+# named-entity-recognition model this project does not have. Edges are
+# document -> term (a term appeared in that document) and term <-> term
+# (two terms co-occurred in the same chunk), both weighted by frequency.
+# The graph explicitly reports its own method so the frontend can label it
+# honestly rather than imply it is something more than it is.
+
+_EQUIPMENT_TAG = re.compile(r"\b[A-Z]{1,5}-\d{2,4}[A-Z]?\b")
+_TITLE_PHRASE = re.compile(r"\b(?:[A-Z][a-zA-Z]{2,}(?:\s+[A-Z][a-zA-Z]{2,}){1,2})\b")
+_STOPWORD_PHRASES = frozenset({"The", "This", "That", "These", "Those"})
+
+#: Cap on term nodes returned, so a large corpus still renders a legible graph.
+_MAX_TERM_NODES = 60
+
+
+def _extract_terms(text: str) -> set[str]:
+    terms = set(_EQUIPMENT_TAG.findall(text))
+    terms |= {
+        phrase
+        for phrase in _TITLE_PHRASE.findall(text)
+        if phrase.split()[0] not in _STOPWORD_PHRASES
+    }
+    return terms
+
+
+class GraphNode(BaseModel):
+    id: str
+    label: str
+    kind: Literal["document", "term"]
+    weight: int
+
+
+class GraphEdge(BaseModel):
+    id: str
+    source: str
+    target: str
+    weight: int
+
+
+class KnowledgeGraphResponse(BaseModel):
+    nodes: list[GraphNode] = Field(default_factory=list)
+    edges: list[GraphEdge] = Field(default_factory=list)
+    documents_indexed: int
+    method: str = (
+        "Heuristic term extraction (equipment-tag and Title-Case-phrase regexes) "
+        "and co-occurrence counting over indexed chunk text. Not named-entity "
+        "recognition; a term node is a recurring token pattern, not a verified entity."
+    )
+
+
+@router.get("/graph", response_model=KnowledgeGraphResponse)
+async def knowledge_graph(
+    context: Context,
+    limit_documents: Annotated[int, Query(ge=1, le=200)] = 50,
+) -> KnowledgeGraphResponse:
+    """A real, heuristic co-occurrence graph over ingested documents.
+
+    No entity is invented: every node traces to an actual document or a
+    pattern match against actual chunk text, and every edge count is a real
+    tally, not a plausible-looking placeholder.
+    """
+    async with context.database.session() as session:
+        documents = await KnowledgeRepository(session).list_documents()
+    indexed = [d for d in documents if d.status == DocumentStatus.INDEXED][:limit_documents]
+
+    doc_nodes: dict[str, GraphNode] = {}
+    term_counts: Counter[str] = Counter()
+    doc_term_counts: dict[tuple[str, str], int] = defaultdict(int)
+    term_cooccurrence: dict[tuple[str, str], int] = defaultdict(int)
+
+    async with context.database.session() as session:
+        repository = KnowledgeRepository(session)
+        for document in indexed:
+            chunks = await repository.list_chunks(document.id)
+            doc_nodes[document.id] = GraphNode(
+                id=f"doc:{document.id}",
+                label=document.filename,
+                kind="document",
+                weight=len(chunks),
+            )
+            for chunk in chunks:
+                terms = _extract_terms(chunk.text)
+                for term in terms:
+                    term_counts[term] += 1
+                    doc_term_counts[(document.id, term)] += 1
+                for a, b in itertools.combinations(sorted(terms), 2):
+                    term_cooccurrence[(a, b)] += 1
+
+    top_terms = [term for term, _ in term_counts.most_common(_MAX_TERM_NODES)]
+    top_term_set = set(top_terms)
+
+    nodes: list[GraphNode] = list(doc_nodes.values())
+    nodes += [
+        GraphNode(id=f"term:{term}", label=term, kind="term", weight=term_counts[term])
+        for term in top_terms
+    ]
+
+    edges: list[GraphEdge] = []
+    for (document_id, term), weight in doc_term_counts.items():
+        if term not in top_term_set:
+            continue
+        edges.append(
+            GraphEdge(
+                id=f"dt:{document_id}:{term}",
+                source=f"doc:{document_id}",
+                target=f"term:{term}",
+                weight=weight,
+            )
+        )
+    for (a, b), weight in term_cooccurrence.items():
+        if a not in top_term_set or b not in top_term_set:
+            continue
+        edges.append(
+            GraphEdge(id=f"tt:{a}:{b}", source=f"term:{a}", target=f"term:{b}", weight=weight)
+        )
+
+    return KnowledgeGraphResponse(nodes=nodes, edges=edges, documents_indexed=len(indexed))

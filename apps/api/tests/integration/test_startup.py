@@ -33,9 +33,9 @@ async def test_health_endpoint(async_client: httpx.AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
-async def test_tools_listing_endpoint(async_client: httpx.AsyncClient) -> None:
+async def test_tools_listing_endpoint(authenticated_client: httpx.AsyncClient) -> None:
     """GET /api/tools returns the registered MVP tools."""
-    response = await async_client.get("/api/tools")
+    response = await authenticated_client.get("/api/tools")
     assert response.status_code == 200
     tools = response.json()
     assert isinstance(tools, list)
@@ -45,9 +45,9 @@ async def test_tools_listing_endpoint(async_client: httpx.AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
-async def test_sandbox_status_endpoint(async_client: httpx.AsyncClient) -> None:
+async def test_sandbox_status_endpoint(authenticated_client: httpx.AsyncClient) -> None:
     """GET /api/sandbox/status returns container sandbox availability and policy."""
-    response = await async_client.get("/api/sandbox/status")
+    response = await authenticated_client.get("/api/sandbox/status")
     assert response.status_code == 200
     data = response.json()
     assert "available" in data

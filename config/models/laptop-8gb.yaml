@@ -59,26 +59,86 @@ models:
     license: apache-2.0
 
   - id: vision-document
-    display_name: "Qwen 2.5 VL 3B"
+    display_name: "Llava 7B (Vision Specialist)"
     role: vision
     runtime_id: ollama
-    runtime_model_id: qwen2.5-vl:3b
+    runtime_model_id: llava:7b
     capabilities:
-      text: 0.80
-      vision: 0.90
-      doc_understanding: 0.85
+      text: 0.85
+      vision: 0.95
+      doc_understanding: 0.90
     context_window: 4096
     max_output_tokens: 2048
     num_ctx: 4096
     device: gpu
-    vram_gb: 3.2
-    quantization: Q4_K_M
+    vram_gb: 4.7
+    quantization: Q4_0
     modalities_in:
       - text
       - image
     priority: 70
     enabled: true
     license: apache-2.0
+
+  - id: general-llama3
+    display_name: "Llama 3 8B"
+    role: general
+    runtime_id: ollama
+    runtime_model_id: llama3:latest
+    capabilities:
+      text: 0.90
+      reasoning: 0.85
+    context_window: 8192
+    max_output_tokens: 2048
+    num_ctx: 8192
+    device: gpu
+    vram_gb: 4.6
+    quantization: Q4_0
+    modalities_in:
+      - text
+    priority: 55
+    enabled: true
+    license: meta-llama-3
+
+  - id: general-mistral
+    display_name: "Mistral 7B"
+    role: general
+    runtime_id: ollama
+    runtime_model_id: mistral:latest
+    capabilities:
+      text: 0.85
+      reasoning: 0.80
+    context_window: 8192
+    max_output_tokens: 2048
+    num_ctx: 8192
+    device: gpu
+    vram_gb: 4.3
+    quantization: Q4_0
+    modalities_in:
+      - text
+    priority: 50
+    enabled: true
+    license: apache-2.0
+
+  - id: reasoning-phi35
+    display_name: "Phi 3.5 3.8B"
+    role: general
+    runtime_id: ollama
+    runtime_model_id: phi3.5:latest
+    capabilities:
+      text: 0.85
+      reasoning: 0.85
+    context_window: 4096
+    max_output_tokens: 2048
+    num_ctx: 4096
+    device: gpu
+    vram_gb: 2.2
+    quantization: Q4_0
+    modalities_in:
+      - text
+    priority: 45
+    enabled: true
+    license: mit
 
   - id: text-embedding
     display_name: "Nomic Embed Text (CPU)"

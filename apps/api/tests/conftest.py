@@ -32,28 +32,20 @@ def in_memory_event_bus() -> EventBus:
 @pytest.fixture
 def test_settings(tmp_path: Path) -> Settings:
     """Isolated test settings rooted in a temporary directory."""
-    db_path = str(tmp_path / "vajra_test.db")
-    base_dir = str(tmp_path)
-    artifacts_dir = str(tmp_path / "artifacts")
-    data_dir = str(tmp_path / "data")
-    logs_dir = str(tmp_path / "logs")
+    db_path = tmp_path / "vajra_test.db"
+    artifacts_dir = tmp_path / "artifacts"
+    data_dir = tmp_path / "data"
 
-    for d in (artifacts_dir, data_dir, logs_dir):
+    for d in (artifacts_dir, data_dir):
         Path(d).mkdir(parents=True, exist_ok=True)
 
     return Settings(
         profile=Profile.DEVELOPMENT,
         paths=PathSettings(
-            base_dir=base_dir,
             data_dir=data_dir,
             artifacts_dir=artifacts_dir,
-            logs_dir=logs_dir,
         ),
-        database=DatabaseSettings(
-            path=db_path,
-            pool_size=5,
-            timeout_seconds=5.0,
-        ),
+        database=DatabaseSettings(path=db_path),
         qdrant=QdrantSettings(
             path=":memory:",
             cloud_inference=False,
@@ -90,3 +82,15 @@ async def async_client(test_app: FastAPI) -> AsyncIterator[httpx.AsyncClient]:
     transport = httpx.ASGITransport(app=test_app)
     async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
         yield client
+
+
+@pytest.fixture
+async def authenticated_client(async_client: httpx.AsyncClient) -> httpx.AsyncClient:
+    """An HTTP test client pre-authenticated as the bootstrap admin."""
+    res = await async_client.post(
+        "/api/auth/login",
+        json={"username": "admin", "password": "sovereign2026"},
+    )
+    assert res.status_code == 200
+    return async_client
+

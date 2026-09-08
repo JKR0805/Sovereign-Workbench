@@ -24,17 +24,28 @@ class RunRepository(Repository):
         await self.session.flush()
 
     async def list(
-        self, *, status: RunStatus | None = None, limit: int = 50, offset: int = 0
+        self,
+        *,
+        user_id: str | None = None,
+        status: RunStatus | None = None,
+        limit: int = 50,
+        offset: int = 0,
     ) -> list[RunRecord]:
         statement = select(RunRecord)
+        if user_id is not None:
+            statement = statement.where(RunRecord.user_id == user_id)
         if status is not None:
             statement = statement.where(RunRecord.status == status)
         statement = statement.order_by(RunRecord.created_at.desc()).limit(limit).offset(offset)
         result = await self.session.execute(statement)
         return list(result.scalars().all())
 
-    async def count(self, *, status: RunStatus | None = None) -> int:
+    async def count(
+        self, *, user_id: str | None = None, status: RunStatus | None = None
+    ) -> int:
         statement = select(func.count()).select_from(RunRecord)
+        if user_id is not None:
+            statement = statement.where(RunRecord.user_id == user_id)
         if status is not None:
             statement = statement.where(RunRecord.status == status)
         result = await self.session.execute(statement)
@@ -46,6 +57,11 @@ class RunRepository(Repository):
         self.session.add(record)
         await self.session.flush()
         return record
+
+    async def save_step(self, record: RunStepRecord) -> RunStepRecord:
+        merged = await self.session.merge(record)
+        await self.session.flush()
+        return merged
 
     async def list_steps(self, run_id: str) -> list[RunStepRecord]:
         statement = (

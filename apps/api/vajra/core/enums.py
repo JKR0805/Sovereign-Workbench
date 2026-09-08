@@ -106,6 +106,28 @@ class DocumentStatus(str, Enum):
     EMBEDDING = "embedding"
     INDEXED = "indexed"
     FAILED = "failed"
+    SKIPPED = "skipped"
+    """Persisted and hashed, but deliberately never parsed (an image attachment)."""
+
+
+class MessageStatus(str, Enum):
+    """A conversation message's lifecycle. Distinct from ``RunStatus``: a message
+    can be ``PENDING`` while its run is still ``QUEUED``."""
+
+    PENDING = "pending"
+    STREAMING = "streaming"
+    COMPLETE = "complete"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+class AttachmentKind(str, Enum):
+    """How a run attachment should be handled. ``AUTO`` lets intake decide from
+    mime/extension/content sniffing -- never from ``bool(data)``."""
+
+    AUTO = "auto"
+    IMAGE = "image"
+    DOCUMENT = "document"
 
 
 class ArtifactKind(str, Enum):
@@ -143,3 +165,10 @@ class AddressClass(str, Enum):
     LOCAL = "local"
     INTERNAL = "internal"
     EXTERNAL = "external"
+
+
+class UserRole(str, Enum):
+    """Role of an authenticated user."""
+
+    ADMIN = "admin"
+    USER = "user"

@@ -10,6 +10,7 @@ and a schema initialiser; the API layer wires them into request dependencies.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -29,6 +30,9 @@ from vajra.core.config import DatabaseSettings
 # Importing the table module registers every table on SQLModel.metadata. Without
 # it, create_all() produces an empty schema.
 from vajra.store import models as _tables  # noqa: F401
+from vajra.store.schema_sync import sync_additive_columns
+
+logger = logging.getLogger(__name__)
 
 
 def _install_pragmas(engine: AsyncEngine, settings: DatabaseSettings) -> None:
@@ -89,6 +93,17 @@ class Database:
 
     async def init(self) -> None:
         await init_schema(self.engine)
+        if self.settings.auto_migrate:
+            report = await sync_additive_columns(self.engine)
+            for added in report.added:
+                logger.info("schema sync: added %s.%s", added.table, added.column)
+            for manual in report.manual:
+                logger.warning(
+                    "schema sync: %s.%s needs a manual migration: %s",
+                    manual.table,
+                    manual.column,
+                    manual.reason,
+                )
 
     async def dispose(self) -> None:
         await self.engine.dispose()

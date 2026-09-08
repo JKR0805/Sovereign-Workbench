@@ -24,9 +24,11 @@ from vajra.core.enums import (
     EgressLayer,
     EgressVerdict,
     HealthState,
+    MessageStatus,
     RunStatus,
     RuntimeKind,
     StepStatus,
+    UserRole,
 )
 
 
@@ -186,6 +188,99 @@ class ChunkRecord(SQLModel, table=True):
     embedded_at: datetime | None = None
 
 
+# --- users and sessions --------------------------------------------------
+
+
+class UserRecord(SQLModel, table=True):
+    """An authenticated user account."""
+
+    __tablename__ = "users"
+
+    id: str = Field(default_factory=new_id, primary_key=True)
+    username: str = Field(unique=True, index=True)
+    password_hash: str
+    role: UserRole = Field(default=UserRole.USER, index=True)
+    display_name: str | None = None
+    enabled: bool = Field(default=True, index=True)
+    must_change_password: bool = Field(default=False)
+    created_at: datetime = Field(default_factory=utcnow)
+    created_by: str | None = Field(default=None, foreign_key="users.id")
+    last_login_at: datetime | None = None
+
+
+class SessionRecord(SQLModel, table=True):
+    """A server-side session token representing an active login."""
+
+    __tablename__ = "sessions"
+
+    id: str = Field(default_factory=new_id, primary_key=True)
+    user_id: str = Field(foreign_key="users.id", index=True)
+    token_hash: str = Field(unique=True, index=True)
+    created_at: datetime = Field(default_factory=utcnow)
+    expires_at: datetime
+    last_seen_at: datetime = Field(default_factory=utcnow)
+    revoked: bool = Field(default=False, index=True)
+
+
+# --- conversations ---------------------------------------------------------
+
+
+class ConversationRecord(SQLModel, table=True):
+    """A chat thread. Denormalised counters are maintained transactionally by
+    :class:`~vajra.orchestrator.conversations.ConversationService` alongside the
+    message inserts they summarise, so they never drift from the message table."""
+
+    __tablename__ = "conversations"
+    __table_args__ = (Index("ix_conversations_updated_at", "updated_at"),)
+
+    id: str = Field(default_factory=new_id, primary_key=True)
+    user_id: str | None = Field(default=None, foreign_key="users.id", index=True)
+    project_id: str | None = Field(default=None, foreign_key="projects.id", index=True)
+    title: str = "New conversation"
+    title_locked: bool = False
+    pinned: bool = False
+    archived: bool = Field(default=False, index=True)
+    message_count: int = 0
+    total_tokens: int = 0
+    last_model_id: str | None = None
+    last_message_at: datetime | None = None
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+class MessageRecord(SQLModel, table=True):
+    """One turn. Assistant-turn provenance fields are ``None`` on a user turn and
+    populated from measured runtime output, never estimated, on an assistant
+    turn -- see the token-count fields below."""
+
+    __tablename__ = "messages"
+    __table_args__ = (
+        UniqueConstraint("conversation_id", "ordinal", name="uq_messages_conversation_ordinal"),
+        Index("ix_messages_conversation_ordinal", "conversation_id", "ordinal"),
+    )
+
+    id: str = Field(default_factory=new_id, primary_key=True)
+    conversation_id: str = Field(foreign_key="conversations.id", index=True)
+    ordinal: int
+    role: str
+    content: str = ""
+    status: MessageStatus = Field(default=MessageStatus.COMPLETE)
+
+    run_id: str | None = Field(default=None, foreign_key="runs.id", index=True)
+    model_id: str | None = None
+    runtime_model_id: str | None = None
+    # Measured from the runtime's own usage report. NULL means "not reported",
+    # never a fabricated 0.
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
+    tokens_per_sec: float | None = None
+    duration_ms: float | None = None
+    citations: list[dict[str, Any]] = _json_list_column()
+    attachments: list[dict[str, Any]] = _json_list_column()
+    error: str | None = None
+    created_at: datetime = Field(default_factory=utcnow)
+
+
 # --- agents and runs -----------------------------------------------------
 
 
@@ -207,6 +302,7 @@ class RunRecord(SQLModel, table=True):
     __table_args__ = (Index("ix_runs_started_at", "started_at"),)
 
     id: str = Field(default_factory=new_id, primary_key=True)
+    user_id: str | None = Field(default=None, foreign_key="users.id", index=True)
     project_id: str | None = Field(default=None, foreign_key="projects.id", index=True)
     agent_id: str | None = Field(default=None, foreign_key="agents.id", index=True)
     prompt: str

@@ -1,12 +1,8 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import {
-  MOCK_WORKFLOW_NODES,
-  MOCK_WORKFLOW_EDGES
-} from '../../lib/mockData';
 import { WorkflowNode, WorkflowEdge } from '../../lib/types';
-import { MockBadge } from '../../components/primitives/MockBadge';
+import { api } from '../../lib/api';
 import {
   GitFork,
   Cpu,
@@ -23,8 +19,28 @@ import {
   Sparkles,
   RotateCcw,
   Sliders,
-  Layers
+  Layers,
+  PencilRuler
 } from 'lucide-react';
+
+// Starter definitions for the design canvas below. This page is a workflow
+// *designer*: it lets an operator sketch a pipeline and its node graph.
+// There is no backend workflow engine yet (no model, table or endpoint), so
+// nothing here executes -- see the "Design Preview" notice and the disabled
+// Deploy button.
+const STARTER_NODES: WorkflowNode[] = [
+  { id: 'n-1', label: 'Document Trigger', type: 'trigger', subtext: 'New upload to Knowledge Center', x: 320, y: 30 },
+  { id: 'n-2', label: 'Compliance Reader', type: 'document_reader', subtext: 'Extract clauses & obligations', x: 320, y: 150 },
+  { id: 'n-3', label: 'Compliance Agent', type: 'llm_agent', subtext: 'Assess regulatory alignment', x: 320, y: 280 },
+  { id: 'n-4', label: 'Human Review', type: 'human_review', subtext: 'Operator sign-off', x: 320, y: 410 },
+  { id: 'n-5', label: 'Report Output', type: 'output', subtext: 'Emit summary artifact', x: 320, y: 530 },
+];
+const STARTER_EDGES: WorkflowEdge[] = [
+  { id: 'e-1', source: 'n-1', target: 'n-2' },
+  { id: 'e-2', source: 'n-2', target: 'n-3' },
+  { id: 'e-3', source: 'n-3', target: 'n-4' },
+  { id: 'e-4', source: 'n-4', target: 'n-5' },
+];
 
 interface PrebuiltTemplate {
   id: string;
@@ -39,20 +55,20 @@ const PREBUILT_TEMPLATES: PrebuiltTemplate[] = [
   {
     id: 'compliance',
     name: 'Regulatory Compliance Analysis',
-    desc: 'Analyzes new documents for regulatory compliance using multi-agent pipeline.',
-    model: 'Llama 3.1 70B',
-    nodes: MOCK_WORKFLOW_NODES,
-    edges: MOCK_WORKFLOW_EDGES,
+    desc: 'Sketches a pipeline for analyzing new documents for regulatory compliance.',
+    model: 'general-reasoning',
+    nodes: STARTER_NODES,
+    edges: STARTER_EDGES,
   },
   {
     id: 'sensor-fault',
     name: 'Vibration & Bearing Fault Root Cause',
     desc: 'Diagnoses high-frequency accelerometer telemetry and cross-checks maintenance logs.',
-    model: 'Qwen2-VL 72B',
+    model: 'Llava 7B',
     nodes: [
       { id: 'v-1', label: 'Telemetry Ingestion', type: 'trigger', subtext: 'MQTT Vibration Stream', x: 320, y: 30 },
       { id: 'v-2', label: 'Signal FFT Processor', type: 'data_analyzer', subtext: 'Extract 1x/2x harmonics', x: 320, y: 140 },
-      { id: 'v-3', label: 'Bearing Classifier', type: 'llm_agent', model: 'Qwen2-VL 72B', subtext: 'Classify outer race defect', x: 200, y: 260 },
+      { id: 'v-3', label: 'Bearing Classifier', type: 'llm_agent', model: 'Llava 7B', subtext: 'Classify outer race defect', x: 200, y: 260 },
       { id: 'v-4', label: 'Maintenance Cross-Check', type: 'document_reader', subtext: 'Look up grease schedule', x: 440, y: 260 },
       { id: 'v-5', label: 'Work Order Dispatch', type: 'output', subtext: 'Trigger SAP PM notification', x: 320, y: 390 },
     ],
@@ -68,11 +84,11 @@ const PREBUILT_TEMPLATES: PrebuiltTemplate[] = [
     id: 'code-ast',
     name: 'Airgapped Code AST Security Scan',
     desc: 'Scans Python algorithms for disallowed socket imports before local container sandbox dispatch.',
-    model: 'Llama 3.1 70B',
+    model: 'Qwen 2.5 Coder 7B',
     nodes: [
       { id: 'c-1', label: 'Code Submission', type: 'trigger', subtext: 'User Script Payload', x: 320, y: 30 },
       { id: 'c-2', label: 'AST Policy Guard', type: 'tool_executor', subtext: 'Scan forbidden syscalls', x: 320, y: 150 },
-      { id: 'c-3', label: 'Static Analyzer Agent', type: 'llm_agent', model: 'Llama 3.1 70B', subtext: 'Verify memory safety & complexity', x: 320, y: 280 },
+      { id: 'c-3', label: 'Static Analyzer Agent', type: 'llm_agent', model: 'Qwen 2.5 Coder 7B', subtext: 'Verify memory safety & complexity', x: 320, y: 280 },
       { id: 'c-4', label: 'Isolated Execution', type: 'output', subtext: 'Run in cgroups sandbox', x: 320, y: 410 },
     ],
     edges: [
@@ -83,22 +99,40 @@ const PREBUILT_TEMPLATES: PrebuiltTemplate[] = [
   }
 ];
 
+const SERVICE_CAPABILITIES = new Set(['embedding', 'reranking']);
+
 export default function WorkflowsPage() {
-  const [nodes, setNodes] = useState<WorkflowNode[]>(MOCK_WORKFLOW_NODES);
-  const [edges, setEdges] = useState<WorkflowEdge[]>(MOCK_WORKFLOW_EDGES);
-  const [selectedNodeId, setSelectedNodeId] = useState<string>(MOCK_WORKFLOW_NODES[1].id);
+  const [nodes, setNodes] = useState<WorkflowNode[]>(STARTER_NODES);
+  const [edges, setEdges] = useState<WorkflowEdge[]>(STARTER_EDGES);
+  const [selectedNodeId, setSelectedNodeId] = useState<string>(STARTER_NODES[1].id);
   const [workflowName, setWorkflowName] = useState('Regulatory Compliance Analysis');
   const [description, setDescription] = useState(
-    'Analyzes new documents for regulatory compliance using multi-agent pipeline.'
+    'Sketches a pipeline for analyzing new documents for regulatory compliance.'
   );
-  const [assignedModel, setAssignedModel] = useState('Llama 3.1 70B');
+  const [assignedModel, setAssignedModel] = useState('general-reasoning');
   const [enableHumanReview, setEnableHumanReview] = useState(true);
   const [saveToKb, setSaveToKb] = useState(true);
   const [sendNotifications, setSendNotifications] = useState(false);
-  const [isDeploying, setIsDeploying] = useState(false);
-  const [deployed, setDeployed] = useState(false);
   const [isSavedLocally, setIsSavedLocally] = useState(false);
   const [saveToast, setSaveToast] = useState(false);
+  const [fleetModels, setFleetModels] = useState<{ id: string; name: string }[]>([]);
+
+  useEffect(() => {
+    api
+      .getModels()
+      .then((mList) => {
+        const keys = (m: { capabilities: Record<string, number> }) => Object.keys(m.capabilities || {});
+        setFleetModels(
+          mList
+            .filter((m) => {
+              const caps = keys(m);
+              return caps.length === 0 || !caps.every((c) => SERVICE_CAPABILITIES.has(c));
+            })
+            .map((m) => ({ id: m.id, name: m.display_name }))
+        );
+      })
+      .catch(() => setFleetModels([]));
+  }, []);
 
   // Left sidebar tab: 'nodes' or 'templates'
   const [leftTab, setLeftTab] = useState<'nodes' | 'templates'>('nodes');
@@ -239,30 +273,20 @@ export default function WorkflowsPage() {
     }
   };
 
-  // Reset to default mock template
-  const handleResetToMock = () => {
+  // Reset to the starter design
+  const handleResetToStarter = () => {
     try {
       localStorage.removeItem('sovereign_custom_workflow');
     } catch {
       // ignore
     }
-    setNodes(MOCK_WORKFLOW_NODES);
-    setEdges(MOCK_WORKFLOW_EDGES);
+    setNodes(STARTER_NODES);
+    setEdges(STARTER_EDGES);
     setWorkflowName('Regulatory Compliance Analysis');
-    setDescription('Analyzes new documents for regulatory compliance using multi-agent pipeline.');
-    setAssignedModel('Llama 3.1 70B');
-    setSelectedNodeId(MOCK_WORKFLOW_NODES[1].id);
+    setDescription('Sketches a pipeline for analyzing new documents for regulatory compliance.');
+    setAssignedModel('general-reasoning');
+    setSelectedNodeId(STARTER_NODES[1].id);
     setIsSavedLocally(false);
-  };
-
-  const handleDeploy = () => {
-    setIsDeploying(true);
-    setTimeout(() => {
-      setIsDeploying(false);
-      setDeployed(true);
-      handleSaveWorkflow();
-      setTimeout(() => setDeployed(false), 2500);
-    }, 600);
   };
 
   // Outgoing edges from selected node
@@ -278,12 +302,17 @@ export default function WorkflowsPage() {
           <div>
             <div className="flex items-center gap-2">
               <h1 className="text-base font-bold text-text-primary">{workflowName}</h1>
-              {isSavedLocally ? (
+              <span
+                className="flex items-center gap-1 px-2 py-0.5 rounded text-xs font-mono bg-warn/10 text-warn border border-warn/30"
+                title="This canvas designs a workflow's node graph. There is no execution engine behind it yet -- saving keeps your design locally; nothing here runs."
+              >
+                <PencilRuler className="w-3 h-3" />
+                Design Preview -- Not Executable
+              </span>
+              {isSavedLocally && (
                 <span className="px-2 py-0.5 rounded text-xs font-mono bg-ok/15 text-ok border border-ok/30">
-                  Custom Saved
+                  Saved Locally
                 </span>
-              ) : (
-                <MockBadge label="Mock Template" size="sm" />
               )}
             </div>
             <p className="text-xs text-text-tertiary">
@@ -300,9 +329,9 @@ export default function WorkflowsPage() {
           )}
 
           <button
-            onClick={handleResetToMock}
+            onClick={handleResetToStarter}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-bg-elevated border border-border hover:border-border-strong text-text-secondary hover:text-text-primary text-xs font-mono transition-colors"
-            title="Reset to default mock template"
+            title="Reset to the starter design"
           >
             <RotateCcw className="w-3.5 h-3.5" />
             <span>Reset</span>
@@ -310,20 +339,11 @@ export default function WorkflowsPage() {
 
           <button
             onClick={handleSaveWorkflow}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-bg-elevated border border-border hover:border-accent text-text-primary hover:text-accent text-xs font-mono transition-colors font-semibold"
-            title="Save workflow locally"
+            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded bg-accent hover:bg-accent-hover text-white text-xs font-semibold shadow transition-all active:scale-95"
+            title="Save this design locally in your browser"
           >
             <Save className="w-3.5 h-3.5" />
-            <span>Save</span>
-          </button>
-
-          <button
-            onClick={handleDeploy}
-            disabled={isDeploying}
-            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded bg-accent hover:bg-accent-hover text-white text-xs font-semibold shadow transition-all active:scale-95"
-          >
-            <Play className="w-3.5 h-3.5 fill-current" />
-            <span>{isDeploying ? 'Deploying...' : deployed ? '✓ Deployed' : 'Deploy'}</span>
+            <span>Save Design</span>
           </button>
         </div>
       </div>
@@ -409,7 +429,6 @@ export default function WorkflowsPage() {
                 >
                   <div className="flex items-center justify-between mb-1">
                     <span className="font-semibold text-xs truncate">{tpl.name}</span>
-                    <MockBadge label="Mock" size="sm" />
                   </div>
                   <p className="text-xs text-text-secondary line-clamp-2 leading-relaxed">
                     {tpl.desc}
@@ -643,10 +662,11 @@ export default function WorkflowsPage() {
                     onChange={(e) => handleUpdateNode({ model: e.target.value })}
                     className="bg-bg-elevated border border-border rounded px-2.5 py-1.5 text-xs text-text-primary focus:border-accent outline-none font-mono"
                   >
-                    <option value="Llama 3.1 70B">Llama 3.1 70B</option>
-                    <option value="Qwen2-VL 72B">Qwen2-VL 72B (Vision + OCR)</option>
-                    <option value="General Reasoning (Qwen 3 8B)">General Reasoning (Qwen 3 8B)</option>
-                    <option value="Mistral Large 2">Mistral Large 2</option>
+                    {fleetModels.map((fm) => (
+                      <option key={fm.id} value={fm.name}>
+                        {fm.name}
+                      </option>
+                    ))}
                   </select>
                 </div>
 
@@ -753,9 +773,11 @@ export default function WorkflowsPage() {
                     }}
                     className="bg-bg-elevated border border-border rounded px-2.5 py-1.5 text-xs text-text-primary focus:border-accent outline-none font-mono"
                   >
-                    <option value="Llama 3.1 70B">Llama 3.1 70B</option>
-                    <option value="Qwen2-VL 72B">Qwen2-VL 72B</option>
-                    <option value="General Reasoning (Qwen 3 8B)">General Reasoning (Qwen 3 8B)</option>
+                    {fleetModels.map((fm) => (
+                      <option key={fm.id} value={fm.name}>
+                        {fm.name}
+                      </option>
+                    ))}
                   </select>
                 </div>
 
@@ -795,16 +817,18 @@ export default function WorkflowsPage() {
             )}
           </div>
 
-          {/* Deploy Button */}
+          {/* No Deploy button: there is no workflow execution engine yet. */}
           <div className="pt-4 border-t border-border mt-4">
             <button
-              onClick={handleDeploy}
-              disabled={isDeploying}
+              onClick={handleSaveWorkflow}
               className="w-full py-2.5 rounded-md bg-accent hover:bg-accent-hover text-white text-xs font-semibold shadow transition-all flex items-center justify-center gap-1.5 active:scale-95"
             >
-              <Play className="w-3.5 h-3.5 fill-current" />
-              <span>{isDeploying ? 'Deploying...' : deployed ? '✓ Deployed Successfully' : 'Deploy Workflow'}</span>
+              <Save className="w-3.5 h-3.5" />
+              <span>Save Design</span>
             </button>
+            <p className="text-xs text-text-tertiary text-center mt-2">
+              This is a design canvas only -- there is no backend workflow engine to deploy to yet.
+            </p>
           </div>
         </div>
       </div>

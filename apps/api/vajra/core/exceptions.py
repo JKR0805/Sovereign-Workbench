@@ -63,6 +63,18 @@ class Conflict(VajraError):
     title = "Conflicting state"
 
 
+class Unauthorized(VajraError):
+    code = "unauthorized"
+    status_code = 401
+    title = "Authentication required"
+
+
+class Forbidden(VajraError):
+    code = "forbidden"
+    status_code = 403
+    title = "Permission denied"
+
+
 # --- honest-absence errors ----------------------------------------------
 
 

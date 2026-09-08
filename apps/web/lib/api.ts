@@ -1,203 +1,179 @@
-import {
-  ModelRead,
-  SystemHealth,
-  NetworkSnapshot,
-  SimulateRequest,
-  SimulateResponse,
-  DocumentRead,
+// Typed client for the VAJRA backend. No mock fallback: a failed request
+// throws ApiError and the caller renders a real error state. The backend is
+// the only source of truth for whether something worked.
+
+import type {
+  AnalyticsSummary,
+  AnalyticsWindow,
+  AuditEventPage,
+  BenchmarkResult,
   ChunkRead,
+  ConversationDetail,
+  ConversationListPage,
+  ConversationRead,
+  CreateUserResponse,
+  DocumentRead,
+  ExecutionMode,
+  GuardResponse,
+  KnowledgeGraphResponse,
   KnowledgeSearchResponse,
-  ToolSpecification,
+  LoginResponse,
+  MessageRead,
+  ModelRead,
+  ModelRegistration,
+  ModelUpdate,
+  NetworkEvent,
+  NetworkSnapshot,
+  NftRuleset,
+  NftStatus,
+  PolicyRead,
+  ProbeReport,
+  ResidencyReport,
+  ResetPasswordResponse,
+  RunAttachment,
+  RunCreated,
+  RunListPage,
   RunRead,
   RunStep,
-  RunArtifact,
-  WireEvent,
-  ProbeEgressResult,
-  ModelProbeResult,
-  AstGuardResult,
-  AuditRecord,
-  ResidencyState,
+  RuntimeHealth,
+  RuntimeModelInfo,
   RuntimeRead,
-  RoutingPolicy,
+  RuntimeRegistration,
   SandboxPolicy,
+  SandboxStatus,
+  ScoringWeights,
   SelfAuditResult,
-  NetworkRulesetResponse,
-  ToolTestResult
+  SessionRead,
+  SimulateResponse,
+  SystemHealth,
+  ToolListing,
+  ToolTestResult,
+  UserRead,
+  UserRole,
+  WireEvent,
 } from './types';
-
-import {
-  MOCK_MODELS,
-  MOCK_DOCUMENTS,
-  MOCK_CHUNKS,
-  MOCK_SYSTEM_HEALTH,
-  MOCK_NETWORK_SNAPSHOT,
-  MOCK_TOOLS,
-  MOCK_RUN,
-  MOCK_RUN_STEPS,
-  MOCK_RUN_ARTIFACTS,
-  MOCK_TIMELINE_EVENTS,
-  MOCK_AUDIT_LOGS,
-  MOCK_RUNTIMES,
-  MOCK_RESIDENCY,
-  MOCK_ROUTING_POLICIES,
-  MOCK_RULESET,
-  MOCK_SELF_AUDIT,
-  MOCK_SANDBOX_POLICY,
-  MOCK_AUDIT_EVENT_TYPES
-} from './mockData';
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL || '/api';
 
-// In-memory mock state during session for mutations
-let sessionModels: ModelRead[] = [...MOCK_MODELS];
-let sessionDocuments: DocumentRead[] = [...MOCK_DOCUMENTS];
-let sessionRuntimes: RuntimeRead[] = [...MOCK_RUNTIMES];
-let sessionRoutingPolicies: RoutingPolicy[] = [...MOCK_ROUTING_POLICIES];
-let sessionBlocksCount = 4;
-let sessionEgressDrops = 4;
+/** All wire event types the backend can emit, kept in sync with
+ * `vajra/events/types.py::EventType`. Used to attach one SSE listener per
+ * named event rather than relying on `onmessage`, which never fires for a
+ * named `event:` frame. */
+const ALL_WIRE_EVENT_TYPES = [
+  'RUN_CREATED',
+  'RUN_COMPLETED',
+  'RUN_FAILED',
+  'RUN_CANCELLED',
+  'NODE_ENTERED',
+  'NODE_COMPLETED',
+  'NODE_FAILED',
+  'DOCUMENT_INGESTED',
+  'PAGE_CLASSIFIED',
+  'ATTACHMENT_SKIPPED',
+  'VISION_ANALYSIS_STARTED',
+  'VISION_ANALYSIS_COMPLETED',
+  'TASK_CLASSIFIED',
+  'MODEL_CANDIDATES',
+  'MODEL_SELECTED',
+  'MODEL_LOADING',
+  'MODEL_READY',
+  'LLM_TOKEN',
+  'RAG_QUERY',
+  'RAG_RESULTS',
+  'TOOL_CALLED',
+  'TOOL_RESULT',
+  'SANDBOX_STARTED',
+  'SANDBOX_COMPLETED',
+  'VERIFICATION_PASSED',
+  'VERIFICATION_FAILED',
+  'FILE_CREATED',
+  'EGRESS_ATTEMPT',
+  'EGRESS_BLOCKED',
+] as const;
 
-import { useState, useEffect } from 'react';
+/** Thrown by every failed request. Carries the backend's RFC 7807 problem
+ * fields when the response had a JSON body, so a caller can branch on
+ * `error.code` (e.g. "no_candidate_models") instead of parsing prose. */
+export class ApiError extends Error {
+  status: number;
+  code?: string;
+  context?: Record<string, unknown>;
 
-// Mock status tracking across API domains
-export type ApiDomain =
-  | 'system'
-  | 'models'
-  | 'runtimes'
-  | 'routing'
-  | 'runs'
-  | 'knowledge'
-  | 'network'
-  | 'tools'
-  | 'audit'
-  | 'workflows'
-  | 'global';
+  constructor(status: number, detail: string, code?: string, context?: Record<string, unknown>) {
+    super(detail);
+    this.name = 'ApiError';
+    this.status = status;
+    this.code = code;
+    this.context = context;
+  }
 
-const mockStatusStore: Record<ApiDomain, boolean> = {
-  system: false,
-  models: false,
-  runtimes: false,
-  routing: false,
-  runs: false,
-  knowledge: false,
-  network: false,
-  tools: false,
-  audit: false,
-  workflows: true, // Default template until deployed/saved
-  global: false,
-};
-
-const mockListeners = new Set<() => void>();
-
-export function getMockStatus(domain: ApiDomain = 'global'): boolean {
-  return mockStatusStore[domain] ?? mockStatusStore.global;
-}
-
-export function subscribeMockStatus(cb: () => void): () => void {
-  mockListeners.add(cb);
-  return () => {
-    mockListeners.delete(cb);
-  };
-}
-
-export function setDomainMockStatus(domain: ApiDomain, isMock: boolean) {
-  if (mockStatusStore[domain] !== isMock) {
-    mockStatusStore[domain] = isMock;
-    if (isMock) {
-      mockStatusStore.global = true;
-    }
-    mockListeners.forEach((fn) => fn());
+  /** True for a request that never reached the server at all (backend down,
+   * DNS failure, CORS). Distinguishing this from a real 4xx/5xx matters: one
+   * means "the server said no", the other means "there is no server". */
+  get isNetworkError(): boolean {
+    return this.status === 0;
   }
 }
 
-export function useIsMock(domain: ApiDomain = 'global'): boolean {
-  const [isMock, setIsMock] = useState<boolean>(() => getMockStatus(domain));
+async function apiFetch<T>(endpoint: string, options?: RequestInit): Promise<T> {
+  const isFormData = typeof FormData !== 'undefined' && options?.body instanceof FormData;
+  const headers: Record<string, string> = {};
+  if (!isFormData) headers['Content-Type'] = 'application/json';
 
-  useEffect(() => {
-    setIsMock(getMockStatus(domain));
-    const unsubscribe = subscribeMockStatus(() => {
-      setIsMock(getMockStatus(domain));
-    });
-    return unsubscribe;
-  }, [domain]);
-
-  return isMock;
-}
-
-function resolveDomainFromEndpoint(endpoint: string): ApiDomain {
-  if (endpoint.includes('/system')) return 'system';
-  if (endpoint.includes('/models')) return 'models';
-  if (endpoint.includes('/runtimes')) return 'runtimes';
-  if (endpoint.includes('/routing')) return 'routing';
-  if (endpoint.includes('/runs')) return 'runs';
-  if (endpoint.includes('/knowledge')) return 'knowledge';
-  if (endpoint.includes('/network')) return 'network';
-  if (endpoint.includes('/tools') || endpoint.includes('/sandbox')) return 'tools';
-  if (endpoint.includes('/audit')) return 'audit';
-  return 'global';
-}
-
-async function fetchWithFallback<T>(
-  endpoint: string,
-  options?: RequestInit,
-  fallbackFn?: () => T | Promise<T>
-): Promise<T> {
-  const domain = resolveDomainFromEndpoint(endpoint);
+  let res: Response;
   try {
-    const isFormData = typeof FormData !== 'undefined' && options?.body instanceof FormData;
-    const headers: Record<string, string> = {};
-    if (!isFormData) {
-      headers['Content-Type'] = 'application/json';
-    }
-
-    const res = await fetch(`${BASE_URL}${endpoint}`, {
+    res = await fetch(`${BASE_URL}${endpoint}`, {
+      credentials: 'include',
       ...options,
-      headers: {
-        ...headers,
-        ...(options?.headers as Record<string, string>),
-      },
+      headers: { ...headers, ...(options?.headers as Record<string, string> | undefined) },
     });
-
-    if (!res.ok) {
-      if (fallbackFn) {
-        setDomainMockStatus(domain, true);
-        return await fallbackFn();
-      }
-      const errorData = await res.json().catch(() => ({ detail: res.statusText }));
-      throw new Error(errorData.detail || `Request failed with status ${res.status}`);
-    }
-
-    setDomainMockStatus(domain, false);
-
-    if (res.status === 204) {
-      return undefined as unknown as T;
-    }
-
-    const contentType = res.headers.get('content-type') || '';
-    if (contentType.includes('application/json')) {
-      return await res.json();
-    }
-    return (await res.text()) as unknown as T;
   } catch (err) {
-    if (fallbackFn) {
-      setDomainMockStatus(domain, true);
-      return await fallbackFn();
-    }
-    throw err;
+    throw new ApiError(
+      0,
+      `Could not reach the backend at ${BASE_URL}${endpoint}. Is the API running?`,
+      'network_error'
+    );
   }
+
+  if (!res.ok) {
+    let detail = res.statusText || `Request failed with status ${res.status}`;
+    let code: string | undefined;
+    let context: Record<string, unknown> | undefined;
+    try {
+      const body = await res.json();
+      if (body?.detail) detail = body.detail;
+      code = body?.code;
+      context = body?.context;
+    } catch {
+      // Non-JSON error body (e.g. a plain-text 503); keep the status text.
+    }
+    throw new ApiError(res.status, detail, code, context);
+  }
+
+  if (res.status === 204) return undefined as unknown as T;
+
+  const contentType = res.headers.get('content-type') || '';
+  if (contentType.includes('application/json')) return (await res.json()) as T;
+  return (await res.text()) as unknown as T;
 }
 
 export const api = {
-  isMock: getMockStatus,
-  useIsMock,
+  // ==========================================
+  // 0. Analytics
+  // ==========================================
+  async getAnalyticsSummary(window: AnalyticsWindow = '7d'): Promise<AnalyticsSummary> {
+    return apiFetch(`/analytics/summary?window=${window}`);
+  },
+
   // ==========================================
   // 1. System & Health
   // ==========================================
   async getSystemHealth(): Promise<SystemHealth> {
-    return fetchWithFallback('/system/health', {}, () => MOCK_SYSTEM_HEALTH);
+    return apiFetch('/system/health');
   },
 
   async ping(): Promise<{ status: string; version: string }> {
-    return fetchWithFallback('/system/ping', {}, () => ({ status: "ok", version: "0.1.0" }));
+    return apiFetch('/system/ping');
   },
 
   // ==========================================
@@ -208,761 +184,562 @@ export const api = {
     if (params?.capability) query.set('capability', params.capability);
     if (params?.enabled_only) query.set('enabled_only', 'true');
     const qs = query.toString() ? `?${query.toString()}` : '';
-
-    return fetchWithFallback(`/models${qs}`, {}, () => {
-      let filtered = [...sessionModels];
-      if (params?.capability) {
-        filtered = filtered.filter(m => params.capability! in m.capabilities);
-      }
-      if (params?.enabled_only) {
-        filtered = filtered.filter(m => m.enabled);
-      }
-      return filtered;
-    });
+    return apiFetch(`/models${qs}`);
   },
 
   async getModel(id: string): Promise<ModelRead> {
-    return fetchWithFallback(`/models/${id}`, {}, () => {
-      const found = sessionModels.find(m => m.id === id);
-      if (!found) throw new Error(`Model ${id} not found`);
-      return found;
+    return apiFetch(`/models/${encodeURIComponent(id)}`);
+  },
+
+  async registerModel(registration: ModelRegistration, probe = true): Promise<ModelRead> {
+    return apiFetch(`/models?probe=${probe}`, {
+      method: 'POST',
+      body: JSON.stringify(registration),
     });
   },
 
-  async registerModel(modelData: Partial<ModelRead>, probe: boolean = true): Promise<ModelRead> {
-    return fetchWithFallback(
-      `/models?probe=${probe}`,
-      {
-        method: 'POST',
-        body: JSON.stringify(modelData),
-      },
-      () => {
-        const newModel: ModelRead = {
-          id: modelData.id || `model-${Date.now()}`,
-          display_name: modelData.display_name || 'Custom Model',
-          runtime_id: modelData.runtime_id || 'ollama-local',
-          runtime_model_id: modelData.runtime_model_id || 'custom:latest',
-          capabilities: modelData.capabilities || { text: 0.8 },
-          context_window: modelData.context_window || 8192,
-          num_ctx: modelData.num_ctx || 8192,
-          vram_gb: modelData.vram_gb || 4.0,
-          device: 'gpu',
-          modalities_in: modelData.modalities_in || ['text'],
-          priority: modelData.priority || 50,
-          enabled: true,
-          license: modelData.license || 'Open-Source',
-          health: 'healthy',
-          avg_latency_ms: 350.0,
-          tokens_per_sec: 40.0,
-          request_count: 0,
-          error_count: 0,
-          last_probe_at: new Date().toISOString(),
-          is_resident: false,
-        };
-        sessionModels.push(newModel);
-        return newModel;
-      }
-    );
-  },
-
-  async updateModel(id: string, modelData: Partial<ModelRead>): Promise<ModelRead> {
-    return fetchWithFallback(
-      `/models/${id}`,
-      {
-        method: 'PATCH',
-        body: JSON.stringify(modelData),
-      },
-      () => {
-        sessionModels = sessionModels.map(m => m.id === id ? { ...m, ...modelData } : m);
-        const updated = sessionModels.find(m => m.id === id);
-        if (!updated) throw new Error(`Model ${id} not found`);
-        return updated;
-      }
-    );
+  async updateModel(id: string, update: ModelUpdate): Promise<ModelRead> {
+    return apiFetch(`/models/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(update),
+    });
   },
 
   async deleteModel(id: string): Promise<void> {
-    return fetchWithFallback(
-      `/models/${id}`,
-      { method: 'DELETE' },
-      () => {
-        sessionModels = sessionModels.filter(m => m.id !== id);
-      }
-    );
+    return apiFetch(`/models/${encodeURIComponent(id)}`, { method: 'DELETE' });
   },
 
-  async probeModel(runtimeId: string, modelId: string): Promise<ModelProbeResult> {
-    return fetchWithFallback(
-      '/models/probe',
-      {
-        method: 'POST',
-        body: JSON.stringify({ runtime_id: runtimeId, runtime_model_id: modelId }),
-      },
-      () => ({
-        runtime_reachable: true,
-        model_available: true,
-        text_generation_ok: true,
-        text_latency_ms: 380.2,
-        vision_ok: modelId.includes('vl') || modelId.includes('vision') || modelId.includes('70b'),
-        tool_calling_ok: true,
-        vram_delta_mb: 5120.0,
-        probed_at: new Date().toISOString(),
-      })
-    );
+  async probeModel(runtime_id: string, runtime_model_id: string): Promise<ProbeReport> {
+    const report = await apiFetch<ProbeReport>('/models/probe', {
+      method: 'POST',
+      body: JSON.stringify({ runtime_id, runtime_model_id }),
+    });
+    return { ...report, ok: report.runtime_reachable && report.model_present };
   },
 
-  async refreshModel(id: string): Promise<ModelRead> {
-    return fetchWithFallback(
-      `/models/${id}/refresh`,
-      { method: 'POST' },
-      () => {
-        const found = sessionModels.find(m => m.id === id);
-        if (!found) throw new Error(`Model ${id} not found`);
-        found.last_probe_at = new Date().toISOString();
-        found.health = 'healthy';
-        return { ...found };
-      }
-    );
-  },
-
-  async getModelResidency(): Promise<ResidencyState> {
-    return fetchWithFallback(
-      '/models/residency',
-      {},
-      () => ({
-        ...MOCK_RESIDENCY,
-        ts: new Date().toISOString()
-      })
-    );
+  async getModelResidency(): Promise<ResidencyReport> {
+    return apiFetch('/models/residency');
   },
 
   async loadModel(id: string): Promise<void> {
-    return fetchWithFallback(
-      `/models/${id}/load`,
-      { method: 'POST' },
-      () => {
-        sessionModels = sessionModels.map(m => ({
-          ...m,
-          is_resident: m.id === id,
-        }));
-      }
-    );
+    return apiFetch(`/models/${encodeURIComponent(id)}/load`, { method: 'POST' });
   },
 
   async unloadModel(id: string): Promise<void> {
-    return fetchWithFallback(
-      `/models/${id}/unload`,
-      { method: 'POST' },
-      () => {
-        sessionModels = sessionModels.map(m =>
-          m.id === id ? { ...m, is_resident: false } : m
-        );
-      }
-    );
+    return apiFetch(`/models/${encodeURIComponent(id)}/unload`, { method: 'POST' });
+  },
+
+  async refreshModel(id: string): Promise<ModelRead> {
+    return apiFetch(`/models/${encodeURIComponent(id)}/refresh`, { method: 'POST' });
+  },
+
+  async benchmarkModel(id: string): Promise<BenchmarkResult> {
+    return apiFetch(`/models/${encodeURIComponent(id)}/benchmark`, { method: 'POST' });
+  },
+
+  async chat(
+    modelId: string,
+    messages: { role: string; content: string; images?: string[] }[],
+    options?: { temperature?: number }
+  ): Promise<{
+    model_id: string;
+    runtime_model_id: string;
+    reply: string;
+    prompt_tokens: number | null;
+    completion_tokens: number | null;
+    tokens_measured: boolean;
+    duration_ms: number;
+  }> {
+    return apiFetch(`/models/${encodeURIComponent(modelId)}/chat`, {
+      method: 'POST',
+      body: JSON.stringify({
+        messages,
+        temperature: options?.temperature ?? 0.7,
+        stream: false,
+      }),
+    });
   },
 
   // ==========================================
   // 3. Runtimes
   // ==========================================
   async getRuntimes(): Promise<RuntimeRead[]> {
-    return fetchWithFallback('/runtimes', {}, () => sessionRuntimes);
+    return apiFetch('/runtimes');
   },
 
   async getRuntime(id: string): Promise<RuntimeRead> {
-    return fetchWithFallback(`/runtimes/${id}`, {}, () => {
-      const found = sessionRuntimes.find(r => r.id === id);
-      if (!found) throw new Error(`Runtime ${id} not found`);
-      return found;
-    });
+    return apiFetch(`/runtimes/${encodeURIComponent(id)}`);
   },
 
-  async registerRuntime(data: Partial<RuntimeRead>): Promise<RuntimeRead> {
-    return fetchWithFallback(
-      '/runtimes',
-      {
-        method: 'POST',
-        body: JSON.stringify(data),
-      },
-      () => {
-        const newRuntime: RuntimeRead = {
-          id: data.id || `runtime-${Date.now()}`,
-          name: data.name || 'Custom Runtime',
-          type: data.type || 'ollama',
-          endpoint: data.endpoint || 'http://127.0.0.1:11434',
-          is_local: true,
-          status: 'healthy',
-          version: '1.0.0',
-          available_models_count: 1
-        };
-        sessionRuntimes.push(newRuntime);
-        return newRuntime;
-      }
-    );
+  async registerRuntime(registration: RuntimeRegistration): Promise<RuntimeRead> {
+    return apiFetch('/runtimes', { method: 'POST', body: JSON.stringify(registration) });
   },
 
-  async getAvailableRuntimeModels(runtimeId: string): Promise<string[]> {
-    return fetchWithFallback(
-      `/runtimes/${runtimeId}/available`,
-      {},
-      () => ['qwen3:8b', 'qwen2.5-vl:3b', 'llama3.1:70b', 'deepseek-r1:14b']
-    );
+  async getAvailableRuntimeModels(runtimeId: string): Promise<RuntimeModelInfo[]> {
+    return apiFetch(`/runtimes/${encodeURIComponent(runtimeId)}/available`);
   },
 
-  async probeRuntime(runtimeId: string): Promise<{ reachable: boolean; latency_ms: number }> {
-    return fetchWithFallback(
-      `/runtimes/${runtimeId}/probe`,
-      { method: 'POST' },
-      () => ({ reachable: true, latency_ms: 12.4 })
-    );
+  async probeRuntime(runtimeId: string): Promise<RuntimeHealth> {
+    return apiFetch(`/runtimes/${encodeURIComponent(runtimeId)}/probe`, { method: 'POST' });
   },
 
   // ==========================================
-  // 4. Routing Engine & Studio
+  // 4. Routing
   // ==========================================
-  async simulateRouting(req: SimulateRequest): Promise<SimulateResponse> {
-    return fetchWithFallback(
-      '/routing/simulate',
-      {
-        method: 'POST',
-        body: JSON.stringify(req),
-      },
-      () => {
-        const text = req.prompt.toLowerCase();
-        const hasImage = req.attachments?.some(a => a.mime.startsWith('image') || (a.scanned_page_count || 0) > 0) || text.includes('scan') || text.includes('diagram') || text.includes('p&id') || text.includes('inspection');
-        const hasCode = text.includes('code') || text.includes('csv') || text.includes('telemetry') || text.includes('script') || text.includes('function') || text.includes('python');
-
-        let selected = "general-reasoning";
-        let score = 91.2;
-        let required_capabilities = ["text"];
-        let intent = "general_reasoning";
-        let rationale = "General reasoning task routed to resident 8B model with verified logic capabilities.";
-
-        if (hasImage) {
-          selected = "qwen2-vl-72b";
-          score = 94.8;
-          required_capabilities = ["vision", "doc_understanding"];
-          intent = "multimodal_inspection";
-          rationale = "Task requires visual reasoning and scanned layout extraction. Routed to top vision specialist.";
-        } else if (hasCode) {
-          selected = "llama-3-1-70b";
-          score = 93.6;
-          required_capabilities = ["coding", "structured_output"];
-          intent = "code_and_telemetry";
-          rationale = "Structured telemetry data parsing routed to high-parameter reasoning & coding model.";
-        }
-
-        return {
-          task: {
-            task_id: `sim-${Date.now()}`,
-            intent,
-            required_capabilities,
-            preferred_capabilities: ["reasoning"],
-            required_modalities: hasImage ? ["text", "image"] : ["text"],
-            estimated_input_tokens: Math.max(120, Math.floor(req.prompt.length / 3) + (req.attachments?.length || 0) * 850),
-            latency_budget_ms: 30000.0,
-          },
-          decision: {
-            task_id: `sim-${Date.now()}`,
-            selected,
-            score,
-            rationale,
-            candidates: [
-              {
-                model_id: selected,
-                total_score: score,
-                capability_score: 0.94,
-                context_score: 0.95,
-                latency_score: 0.90,
-                residency_score: 1.0,
-                is_resident: true,
-              },
-              {
-                model_id: "general-reasoning",
-                total_score: 72.4,
-                capability_score: 0.75,
-                context_score: 0.90,
-                latency_score: 0.88,
-                residency_score: 1.0,
-                is_resident: true,
-              }
-            ],
-            rejected: [
-              {
-                model_id: "mistral-large-2",
-                reason: "DEGRADED_HEALTH",
-                detail: "Model flagged degraded latency / unverified residency"
-              }
-            ],
-            fallbacks: ["general-reasoning", "phi-3-medium"],
-            decided_in_ms: 4.8,
-          }
-        };
-      }
-    );
+  async simulateRouting(request: {
+    prompt: string;
+    attachments?: unknown[];
+    weights?: ScoringWeights;
+    task_labels?: Record<string, string>;
+  }): Promise<SimulateResponse> {
+    return apiFetch('/routing/simulate', { method: 'POST', body: JSON.stringify(request) });
   },
 
-  async getRoutingPolicies(): Promise<RoutingPolicy[]> {
-    return fetchWithFallback('/routing/policies', {}, () => sessionRoutingPolicies);
+  async getRoutingPolicies(): Promise<PolicyRead[]> {
+    return apiFetch('/routing/policies');
   },
 
-  async getRoutingPolicy(id: string): Promise<RoutingPolicy> {
-    return fetchWithFallback(`/routing/policies/${id}`, {}, () => {
-      const found = sessionRoutingPolicies.find(p => p.id === id);
-      if (!found) throw new Error(`Routing policy ${id} not found`);
-      return found;
+  async getRoutingPolicy(id: string): Promise<PolicyRead> {
+    return apiFetch(`/routing/policies/${encodeURIComponent(id)}`);
+  },
+
+  async saveRoutingPolicy(
+    id: string,
+    policy: {
+      name: string;
+      enabled?: boolean;
+      priority?: number;
+      graph?: Record<string, unknown>;
+      rules?: Record<string, unknown>[];
+      weights?: Record<string, number>;
+    }
+  ): Promise<PolicyRead> {
+    return apiFetch(`/routing/policies/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify(policy),
     });
-  },
-
-  async saveRoutingPolicy(id: string, policy: Partial<RoutingPolicy>): Promise<RoutingPolicy> {
-    return fetchWithFallback(
-      `/routing/policies/${id}`,
-      {
-        method: 'PUT',
-        body: JSON.stringify(policy),
-      },
-      () => {
-        sessionRoutingPolicies = sessionRoutingPolicies.map(p => p.id === id ? { ...p, ...policy, updated_at: new Date().toISOString() } : p);
-        const saved = sessionRoutingPolicies.find(p => p.id === id);
-        return saved || (policy as RoutingPolicy);
-      }
-    );
   },
 
   async getRoutingCapabilities(): Promise<string[]> {
-    return fetchWithFallback(
-      '/routing/capabilities',
-      {},
-      () => [
-        "text",
-        "reasoning",
-        "coding",
-        "vision",
-        "embedding",
-        "tool_calling",
-        "structured_output",
-        "doc_understanding",
-        "multimodal"
-      ]
-    );
+    return apiFetch('/routing/capabilities');
   },
 
   // ==========================================
-  // 5. Runs & Agent Orchestration
+  // 5. Runs
   // ==========================================
-  async getRuns(): Promise<RunRead[]> {
-    return fetchWithFallback('/runs', {}, () => [MOCK_RUN]);
+  async getRuns(params?: { status?: string; limit?: number; offset?: number }): Promise<RunListPage> {
+    const query = new URLSearchParams();
+    if (params?.status) query.set('status', params.status);
+    if (params?.limit) query.set('limit', String(params.limit));
+    if (params?.offset) query.set('offset', String(params.offset));
+    const qs = query.toString() ? `?${query.toString()}` : '';
+    return apiFetch(`/runs${qs}`);
   },
 
   async getRun(runId: string): Promise<RunRead> {
-    return fetchWithFallback(`/runs/${runId}`, {}, () => ({
-      ...MOCK_RUN,
-      id: runId,
-    }));
+    return apiFetch(`/runs/${encodeURIComponent(runId)}`);
   },
 
   async getRunSteps(runId: string): Promise<RunStep[]> {
-    return fetchWithFallback(`/runs/${runId}/steps`, {}, () => MOCK_RUN_STEPS);
+    return apiFetch(`/runs/${encodeURIComponent(runId)}/steps`);
   },
 
-  async getRunArtifacts(runId: string): Promise<RunArtifact[]> {
-    return fetchWithFallback(`/runs/${runId}/artifacts`, {}, () => MOCK_RUN_ARTIFACTS);
+  async getRunArtifacts(runId: string): Promise<Record<string, unknown>[]> {
+    return apiFetch(`/runs/${encodeURIComponent(runId)}/artifacts`);
   },
 
   async createRun(
     prompt: string,
-    attachments: any[] = [],
-    execution_mode: 'demo' | 'live' = 'demo'
-  ): Promise<{ run_id: string; status: string; events_url: string }> {
-    return fetchWithFallback(
-      '/runs',
-      {
-        method: 'POST',
-        body: JSON.stringify({ prompt, attachments, execution_mode }),
-      },
-      () => {
-        const id = `run-${Date.now().toString(16)}`;
-        return {
-          run_id: id,
-          status: "pending",
-          events_url: `/api/runs/${id}/events`,
-        };
-      }
-    );
+    attachments: RunAttachment[] = [],
+    executionMode: ExecutionMode = 'agent',
+    opts?: { conversationId?: string; projectId?: string }
+  ): Promise<RunCreated> {
+    const body: Record<string, unknown> = {
+      prompt,
+      attachments,
+      execution_mode: executionMode,
+    };
+    if (opts?.conversationId) body.conversation_id = opts.conversationId;
+    if (opts?.projectId) body.project_id = opts.projectId;
+    return apiFetch('/runs', { method: 'POST', body: JSON.stringify(body) });
   },
 
   async cancelRun(runId: string): Promise<RunRead> {
-    return fetchWithFallback(
-      `/runs/${runId}/cancel`,
-      { method: 'POST' },
-      () => ({
-        ...MOCK_RUN,
-        id: runId,
-        status: "cancelled"
-      })
-    );
+    return apiFetch(`/runs/${encodeURIComponent(runId)}/cancel`, { method: 'POST' });
   },
 
   // ==========================================
-  // 6. Real-Time Server-Sent Events (SSE)
+  // 6. Conversations
   // ==========================================
+  async listConversations(params?: {
+    userId?: string;
+    projectId?: string;
+    archived?: boolean;
+    limit?: number;
+    offset?: number;
+  }): Promise<ConversationListPage> {
+    const query = new URLSearchParams();
+    if (params?.userId) query.set('user_id', params.userId);
+    if (params?.projectId) query.set('project_id', params.projectId);
+    if (params?.archived !== undefined) query.set('archived', String(params.archived));
+    if (params?.limit) query.set('limit', String(params.limit));
+    if (params?.offset) query.set('offset', String(params.offset));
+    const qs = query.toString() ? `?${query.toString()}` : '';
+    return apiFetch(`/conversations${qs}`);
+  },
+
+  async getConversations(params?: {
+    userId?: string;
+    projectId?: string;
+    archived?: boolean;
+    limit?: number;
+    offset?: number;
+  }): Promise<ConversationListPage> {
+    return this.listConversations(params);
+  },
+
+  async createConversation(opts?: string | { title?: string; project_id?: string }): Promise<ConversationRead> {
+    const payload = typeof opts === 'string' ? { title: opts } : opts || {};
+    return apiFetch('/conversations', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async getConversation(id: string): Promise<ConversationDetail> {
+    return apiFetch(`/conversations/${encodeURIComponent(id)}`);
+  },
+
+  async listConversationMessages(id: string): Promise<MessageRead[]> {
+    return apiFetch(`/conversations/${encodeURIComponent(id)}/messages`);
+  },
+
+  async renameConversation(id: string, title: string): Promise<ConversationRead> {
+    return apiFetch(`/conversations/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ title }),
+    });
+  },
+
+  async setConversationPinned(id: string, pinned: boolean): Promise<ConversationRead> {
+    return apiFetch(`/conversations/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ pinned }),
+    });
+  },
+
+  async setConversationArchived(id: string, archived: boolean): Promise<ConversationRead> {
+    return apiFetch(`/conversations/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ archived }),
+    });
+  },
+
+  async deleteConversation(id: string): Promise<void> {
+    return apiFetch(`/conversations/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  },
+
+  // ==========================================
+  // 7. Real-Time Server-Sent Events (SSE)
+  // ==========================================
+
+  /** Subscribes to a run's event stream. Attaches one listener per named
+   * event type (a browser `EventSource`'s `onmessage` never fires for a
+   * named `event:` frame, which is what every frame here is) plus the
+   * server's `lagged` control frame, so a slow consumer is told to
+   * reconcile from `GET /api/runs/{id}/steps` rather than silently missing
+   * events. Returns an unsubscribe function. */
   subscribeToRunEvents(
     runId: string,
     onEvent: (event: WireEvent) => void,
-    onError?: (err: any) => void
+    onError?: (err: unknown) => void,
+    options?: { since?: number; onLagged?: (info: { since: number; dropped: number }) => void }
   ): () => void {
     if (typeof window === 'undefined' || typeof EventSource === 'undefined') {
       return () => {};
     }
 
+    const query = options?.since ? `?since=${options.since}` : '';
+    let es: EventSource;
     try {
-      const es = new EventSource(`${BASE_URL}/runs/${runId}/events`);
-
-      es.onmessage = (e) => {
-        try {
-          const parsed = JSON.parse(e.data);
-          onEvent(parsed);
-        } catch (err) {
-          console.error("Failed to parse SSE event data", err);
-        }
-      };
-
-      es.onerror = (err) => {
-        if (onError) onError(err);
-        es.close();
-      };
-
-      return () => es.close();
+      es = new EventSource(`${BASE_URL}/runs/${encodeURIComponent(runId)}/events${query}`);
     } catch (err) {
-      if (onError) onError(err);
+      onError?.(err);
       return () => {};
     }
+
+    const handleMessage = (e: MessageEvent) => {
+      try {
+        onEvent(JSON.parse(e.data));
+      } catch (err) {
+        console.error('Failed to parse SSE event data', err);
+      }
+    };
+    const handleLagged = (e: MessageEvent) => {
+      try {
+        const payload = JSON.parse(e.data);
+        options?.onLagged?.(payload);
+      } catch {
+        options?.onLagged?.({ since: 0, dropped: 0 });
+      }
+    };
+
+    ALL_WIRE_EVENT_TYPES.forEach((type) => {
+      es.addEventListener(type, handleMessage as EventListener);
+    });
+    es.addEventListener('lagged', handleLagged as EventListener);
+
+    es.onerror = (err) => {
+      if (es.readyState === EventSource.CLOSED) return;
+      onError?.(err);
+    };
+
+    return () => {
+      ALL_WIRE_EVENT_TYPES.forEach((type) => {
+        es.removeEventListener(type, handleMessage as EventListener);
+      });
+      es.removeEventListener('lagged', handleLagged as EventListener);
+      es.close();
+    };
   },
 
   subscribeToNetworkEvents(
-    onEvent: (event: any) => void,
-    onError?: (err: any) => void
+    onEvent: (event: NetworkEvent) => void,
+    onError?: (err: unknown) => void
   ): () => void {
     if (typeof window === 'undefined' || typeof EventSource === 'undefined') {
       return () => {};
     }
-
+    let es: EventSource;
     try {
-      const es = new EventSource(`${BASE_URL}/network/events/stream`);
-
-      es.onmessage = (e) => {
-        try {
-          const parsed = JSON.parse(e.data);
-          onEvent(parsed);
-        } catch (err) {
-          console.error("Failed to parse network SSE event data", err);
-        }
-      };
-
-      es.onerror = (err) => {
-        if (onError) onError(err);
-        es.close();
-      };
-
-      return () => es.close();
+      es = new EventSource(`${BASE_URL}/network/events/stream`);
     } catch (err) {
-      if (onError) onError(err);
+      onError?.(err);
       return () => {};
     }
+
+    const handleMessage = (e: MessageEvent) => {
+      try {
+        onEvent(JSON.parse(e.data));
+      } catch (err) {
+        console.error('Failed to parse network SSE event data', err);
+      }
+    };
+    es.addEventListener('EGRESS_ATTEMPT', handleMessage as EventListener);
+    es.addEventListener('EGRESS_BLOCKED', handleMessage as EventListener);
+    es.onerror = (err) => {
+      if (es.readyState === EventSource.CLOSED) return;
+      onError?.(err);
+    };
+    return () => es.close();
   },
 
   // ==========================================
-  // 7. Knowledge & Document RAG
+  // 8. Knowledge & RAG
   // ==========================================
-  async getDocuments(): Promise<DocumentRead[]> {
-    return fetchWithFallback('/knowledge/documents', {}, () => sessionDocuments);
+  async getDocuments(projectId?: string): Promise<DocumentRead[]> {
+    const qs = projectId ? `?project_id=${encodeURIComponent(projectId)}` : '';
+    return apiFetch(`/knowledge/documents${qs}`);
+  },
+
+  async getDocument(id: string): Promise<DocumentRead> {
+    return apiFetch(`/knowledge/documents/${encodeURIComponent(id)}`);
   },
 
   async uploadDocument(file: File, projectId?: string): Promise<DocumentRead> {
     const formData = new FormData();
     formData.append('file', file);
-    const qs = projectId ? `?project_id=${projectId}` : '';
-
-    return fetchWithFallback(
-      `/knowledge/documents${qs}`,
-      {
-        method: 'POST',
-        body: formData,
-      },
-      () => {
-        const newDoc: DocumentRead = {
-          id: `doc-${Date.now()}`,
-          filename: file.name,
-          sha256: "mock-sha256-" + Math.random().toString(16).substring(2),
-          mime: file.type || "application/octet-stream",
-          size_bytes: file.size,
-          page_count: Math.max(1, Math.round(file.size / 50000)),
-          scanned_page_count: 0,
-          status: "analyzed",
-          parser: file.name.endsWith('.pdf') ? "pymupdf" : "text",
-          ingested_at: new Date().toISOString(),
-          created_at: new Date().toISOString(),
-          chunks_count: Math.max(2, Math.round(file.size / 15000)),
-        };
-        sessionDocuments.unshift(newDoc);
-        return newDoc;
-      }
-    );
+    const qs = projectId ? `?project_id=${encodeURIComponent(projectId)}` : '';
+    return apiFetch(`/knowledge/documents${qs}`, { method: 'POST', body: formData });
   },
 
   async deleteDocument(id: string): Promise<void> {
-    return fetchWithFallback(
-      `/knowledge/documents/${id}`,
-      { method: 'DELETE' },
-      () => {
-        sessionDocuments = sessionDocuments.filter(d => d.id !== id);
-      }
-    );
+    return apiFetch(`/knowledge/documents/${encodeURIComponent(id)}`, { method: 'DELETE' });
   },
 
-  async getDocumentChunks(docId: string): Promise<ChunkRead[]> {
-    return fetchWithFallback(
-      `/knowledge/documents/${docId}/chunks`,
-      {},
-      () => MOCK_CHUNKS[docId] || [
-        {
-          id: `${docId}:0`,
-          document_id: docId,
-          ordinal: 0,
-          text: "Document section excerpt demonstrating local CPU ONNX vector extraction and grounded citation indexing.",
-          section_path: "General Content",
-          page_from: 1,
-          page_to: 1,
-          token_count: 42,
-        }
-      ]
-    );
+  async getDocumentChunks(documentId: string): Promise<ChunkRead[]> {
+    return apiFetch(`/knowledge/documents/${encodeURIComponent(documentId)}/chunks`);
+  },
+
+  async getKnowledgeGraph(limitDocuments = 50): Promise<KnowledgeGraphResponse> {
+    return apiFetch(`/knowledge/graph?limit_documents=${limitDocuments}`);
   },
 
   async searchKnowledge(
     query: string,
-    top_k: number = 3,
-    document_ids: string[] = [],
-    rerank: boolean = true
+    options?: { top_k?: number; document_ids?: string[]; rerank?: boolean }
   ): Promise<KnowledgeSearchResponse> {
-    return fetchWithFallback(
-      '/knowledge/search',
-      {
-        method: 'POST',
-        body: JSON.stringify({ query, top_k, document_ids, rerank }),
-      },
-      () => ({
+    return apiFetch('/knowledge/search', {
+      method: 'POST',
+      body: JSON.stringify({
         query,
-        chunks: [
-          {
-            marker: "[C1]",
-            label: "Refinery_Safety_Manual.pdf > p.12",
-            chunk_id: "chunk-rs-1",
-            document_id: "doc-refinery-safety",
-            text: "In case of abnormal temperature or pressure conditions, the emergency shutdown system (ESD) shall be activated immediately. The ESD will isolate the distillation column and cut feed supply within 30 seconds.",
-            page_from: 12,
-            page_to: 12,
-            section_path: "Safety Protocols > Emergency Shutdown",
-            doc_title: "Refinery_Safety_Manual.pdf",
-            score: 0.942,
-          },
-          {
-            marker: "[C2]",
-            label: "Equipment_Specifications.docx > p.4",
-            chunk_id: "chunk-rs-2",
-            document_id: "doc-equipment-spec",
-            text: "Design maximum temperature limit for distillation column DC-101 is 350°C. Temperature sensor alarms trigger at 340°C.",
-            page_from: 4,
-            page_to: 4,
-            section_path: "Specifications > Thermal Limits",
-            doc_title: "Equipment_Specifications.docx",
-            score: 0.884,
-          }
-        ],
-        reranked: false,
-        timings: {
-          embed_ms: 38.4,
-          retrieve_ms: 5.2,
-          rerank_ms: null,
-          total_ms: 43.6,
-        }
-      })
-    );
-  },
-
-  // ==========================================
-  // 8. Network & Sovereignty Sentinel
-  // ==========================================
-  async getNetworkSnapshot(): Promise<NetworkSnapshot> {
-    return fetchWithFallback('/network/snapshot', {}, () => ({
-      ...MOCK_NETWORK_SNAPSHOT,
-      nft_drop_count: sessionEgressDrops,
-      persisted_block_count: sessionBlocksCount,
-    }));
-  },
-
-  async triggerEgressProbe(): Promise<ProbeEgressResult> {
-    sessionBlocksCount += 1;
-    sessionEgressDrops += 1;
-
-    return fetchWithFallback(
-      '/network/probe',
-      { method: 'POST' },
-      () => ({
-        target: "https://api.openai.com/v1/models",
-        blocked: true,
-        layer: "app",
-        detail: "Blocked egress connection to api.openai.com:443 [RFC1918/loopback policy violation]",
-        caller: "httpx/_transports/default.py:line 84 in socket.connect()",
-      })
-    );
-  },
-
-  async getNetworkRuleset(): Promise<NetworkRulesetResponse> {
-    return fetchWithFallback(
-      '/network/ruleset',
-      {},
-      () => ({
-        available: true,
-        ruleset: MOCK_RULESET
-      })
-    );
-  },
-
-  async getNetworkSelfAudit(): Promise<SelfAuditResult> {
-    return fetchWithFallback(
-      '/network/selfaudit',
-      {},
-      () => MOCK_SELF_AUDIT
-    );
-  },
-
-  // ==========================================
-  // 9. Tools & Sandbox
-  // ==========================================
-  async getTools(): Promise<ToolSpecification[]> {
-    return fetchWithFallback('/tools', {}, () => MOCK_TOOLS);
-  },
-
-  async getTool(name: string): Promise<ToolSpecification> {
-    return fetchWithFallback(`/tools/${name}`, {}, () => {
-      const found = MOCK_TOOLS.find(t => t.name === name);
-      if (!found) throw new Error(`Tool ${name} not found`);
-      return found;
+        top_k: options?.top_k ?? 5,
+        document_ids: options?.document_ids ?? [],
+        rerank: options?.rerank ?? true,
+      }),
     });
   },
 
-  async testTool(name: string, args: Record<string, any> = {}): Promise<ToolTestResult> {
-    return fetchWithFallback(
-      `/tools/${name}/test`,
-      {
-        method: 'POST',
-        body: JSON.stringify(args),
-      },
-      () => ({
-        tool: name,
-        success: true,
-        output: { result: "Tool validation executed successfully in local environment", args_echo: args },
-        duration_ms: 18.5,
-      })
-    );
+  // ==========================================
+  // 9. Network / Sovereignty
+  // ==========================================
+  async getNetworkSnapshot(): Promise<NetworkSnapshot> {
+    return apiFetch('/network/snapshot');
   },
 
-  async getSandboxStatus(): Promise<{ connected: boolean; image: string }> {
-    return fetchWithFallback(
-      '/sandbox/status',
-      {},
-      () => ({ connected: true, image: "vajra-sandbox:py311" })
-    );
+  async getNetworkEvents(limit = 100): Promise<NetworkEvent[]> {
+    return apiFetch(`/network/events?limit=${limit}`);
+  },
+
+  async triggerEgressProbe(): Promise<{
+    target: string;
+    blocked: boolean;
+    layer: string | null;
+    detail: string;
+    caller: string | null;
+  }> {
+    return apiFetch('/network/probe', { method: 'POST' });
+  },
+
+  /** Returns the raw ruleset text plus availability -- the endpoint is a
+   * plain-text body (200) or a 503 with an explanatory plain-text body,
+   * never JSON, so this wraps both into one shape for callers. */
+  async getNetworkRuleset(): Promise<NftRuleset> {
+    const res = await fetch(`${BASE_URL}/network/ruleset`);
+    const text = await res.text();
+    if (!res.ok) return { available: false, detail: text, text: null };
+    return { available: true, detail: 'reachable', text };
+  },
+
+  async getNftStatus(): Promise<NftStatus> {
+    return apiFetch('/network/nft/status');
+  },
+
+  async getNetworkSelfAudit(refresh = false): Promise<SelfAuditResult> {
+    return apiFetch(`/network/selfaudit${refresh ? '?refresh=true' : ''}`);
+  },
+
+  // ==========================================
+  // 10. Tools & Sandbox
+  // ==========================================
+  async getTools(): Promise<ToolListing[]> {
+    return apiFetch('/tools');
+  },
+
+  async getTool(name: string): Promise<ToolListing> {
+    return apiFetch(`/tools/${encodeURIComponent(name)}`);
+  },
+
+  async testTool(name: string, args: Record<string, unknown> = {}): Promise<ToolTestResult> {
+    return apiFetch(`/tools/${encodeURIComponent(name)}/test`, {
+      method: 'POST',
+      body: JSON.stringify({ arguments: args }),
+    });
+  },
+
+  async getSandboxStatus(): Promise<SandboxStatus> {
+    return apiFetch('/sandbox/status');
   },
 
   async getSandboxPolicy(): Promise<SandboxPolicy> {
-    return fetchWithFallback(
-      '/sandbox/policy',
-      {},
-      () => MOCK_SANDBOX_POLICY
-    );
+    return apiFetch('/sandbox/policy');
   },
 
-  async scanAstGuard(code: string): Promise<AstGuardResult> {
-    return fetchWithFallback(
-      '/sandbox/guard',
-      {
-        method: 'POST',
-        body: JSON.stringify({ code }),
-      },
-      () => {
-        const lines = code.split('\n');
-        const violations = [];
-        for (let i = 0; i < lines.length; i++) {
-          const line = lines[i];
-          if (/import\s+(socket|requests|urllib|httpx|aiohttp)/.test(line) || /from\s+(socket|requests|urllib|httpx|aiohttp)/.test(line)) {
-            violations.push({
-              line: i + 1,
-              col: 1,
-              code_snippet: line.trim(),
-              rule: "DISALLOWED_NETWORKING_MODULE",
-              severity: "error" as const,
-            });
-          }
-          if (line.includes('os.system') || line.includes('subprocess.')) {
-            violations.push({
-              line: i + 1,
-              col: 1,
-              code_snippet: line.trim(),
-              rule: "RESTRICTED_SUBPROCESS_INVOCATION",
-              severity: "error" as const,
-            });
-          }
-        }
-        return {
-          valid: violations.length === 0,
-          violations,
-          scanned_in_ms: 1.4,
-        };
-      }
-    );
+  async scanAstGuard(code: string): Promise<GuardResponse> {
+    return apiFetch('/sandbox/guard', { method: 'POST', body: JSON.stringify({ code }) });
   },
 
   // ==========================================
-  // 10. Audit & Event Store
+  // 11. Audit
   // ==========================================
-  async getAuditLogs(params?: { run_id?: string; type?: string; limit?: number; offset?: number }): Promise<AuditRecord[]> {
+  async getAuditLogs(params?: {
+    run_id?: string;
+    type?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<AuditEventPage> {
     const query = new URLSearchParams();
     if (params?.run_id) query.set('run_id', params.run_id);
     if (params?.type) query.set('type', params.type);
     if (params?.limit) query.set('limit', String(params.limit));
     if (params?.offset) query.set('offset', String(params.offset));
     const qs = query.toString() ? `?${query.toString()}` : '';
-
-    return fetchWithFallback(`/audit/events${qs}`, {}, () => {
-      let filtered = [...MOCK_AUDIT_LOGS];
-      if (params?.type && params.type !== 'ALL') {
-        filtered = filtered.filter(l => l.type.includes(params.type!));
-      }
-      if (params?.run_id) {
-        filtered = filtered.filter(l => l.run_id === params.run_id);
-      }
-      return filtered;
-    });
+    return apiFetch(`/audit/events${qs}`);
   },
 
   async getAuditEventTypes(): Promise<string[]> {
-    return fetchWithFallback(
-      '/audit/event-types',
-      {},
-      () => MOCK_AUDIT_EVENT_TYPES
-    );
+    return apiFetch('/audit/event-types');
   },
 
-  async exportAuditManifest(): Promise<{ exported: boolean; filename: string; size_bytes: number }> {
-    return fetchWithFallback(
-      '/audit/export',
-      {},
-      () => ({
-        exported: true,
-        filename: `audit_manifest_${Date.now()}.zip`,
-        size_bytes: 48920
-      })
-    );
-  }
+  /** Currently always raises 501 server-side (Ed25519-signed export is not
+   * implemented). Callers must show that honestly, not synthesize a
+   * download -- see the ApiError this throws. */
+  async exportAuditManifest(runId?: string): Promise<Record<string, unknown>> {
+    const qs = runId ? `?run_id=${encodeURIComponent(runId)}` : '';
+    return apiFetch(`/audit/export${qs}`);
+  },
+
+  // ==========================================
+  // 12. Authentication
+  // ==========================================
+  async login(username: string, password: string, rememberMe = true): Promise<LoginResponse> {
+    return apiFetch('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ username, password, remember_me: rememberMe }),
+    });
+  },
+
+  async logout(): Promise<{ ok: boolean }> {
+    return apiFetch('/auth/logout', { method: 'POST' });
+  },
+
+  async getCurrentUser(): Promise<UserRead> {
+    return apiFetch('/auth/me');
+  },
+
+  async changePassword(oldPassword: string, newPassword: string): Promise<UserRead> {
+    return apiFetch('/auth/change-password', {
+      method: 'POST',
+      body: JSON.stringify({ old_password: oldPassword, new_password: newPassword }),
+    });
+  },
+
+  // ==========================================
+  // 13. Admin Oversight & Management
+  // ==========================================
+  async adminListUsers(limit = 100, offset = 0): Promise<UserRead[]> {
+    return apiFetch(`/admin/users?limit=${limit}&offset=${offset}`);
+  },
+
+  async adminCreateUser(data: {
+    username: string;
+    role?: UserRole;
+    display_name?: string;
+    password?: string;
+  }): Promise<CreateUserResponse> {
+    return apiFetch('/admin/users', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
+  async adminUpdateUser(
+    userId: string,
+    data: { display_name?: string; role?: UserRole; enabled?: boolean }
+  ): Promise<UserRead> {
+    return apiFetch(`/admin/users/${encodeURIComponent(userId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  },
+
+  async adminResetPassword(userId: string): Promise<ResetPasswordResponse> {
+    return apiFetch(`/admin/users/${encodeURIComponent(userId)}/reset-password`, {
+      method: 'POST',
+    });
+  },
+
+  async adminListSessions(): Promise<SessionRead[]> {
+    return apiFetch('/admin/sessions');
+  },
 };

@@ -109,14 +109,26 @@ class Attachment(BaseModel):
     page_count: int | None = None
     scanned_page_count: int | None = None
     extracted_chars: int | None = None
+    extracted_summary: str | None = None
+    requires_multimodal: bool = False
 
 
-def extract_features(prompt: str, attachments: Sequence[Attachment] = ()) -> TaskFeatures:
+def extract_features(
+    prompt: str,
+    attachments: Sequence[Attachment] = (),
+    *,
+    extra_input_chars: int = 0,
+) -> TaskFeatures:
     """Deterministic feature extraction. Hard facts only.
 
     ``estimated_input_tokens`` is explicitly an estimate derived from character
     counts. It is used for context sizing, which is a filter with a 1.3x margin,
     not for anything a user is shown as a measurement.
+
+    ``extra_input_chars`` folds in anything else that will occupy the prompt
+    besides the message text itself -- conversation history, a system preamble --
+    so the context filter sizes against what will actually be sent, not just the
+    latest turn.
     """
     attachment_types = [attachment.mime for attachment in attachments]
 
@@ -132,7 +144,11 @@ def extract_features(prompt: str, attachments: Sequence[Attachment] = ()) -> Tas
         for attachment in attachments
     )
 
-    characters = len(prompt) + sum(attachment.extracted_chars or 0 for attachment in attachments)
+    characters = (
+        len(prompt)
+        + sum(attachment.extracted_chars or 0 for attachment in attachments)
+        + max(0, extra_input_chars)
+    )
     estimated_tokens = characters // CHARS_PER_TOKEN
 
     return TaskFeatures(
@@ -147,13 +163,17 @@ def extract_features(prompt: str, attachments: Sequence[Attachment] = ()) -> Tas
 
 
 def apply_deterministic_overrides(
-    required: frozenset[Capability], features: TaskFeatures, intent: TaskIntent
+    required: frozenset[Capability],
+    features: TaskFeatures,
+    intent: TaskIntent,
+    *,
+    is_coding_task: bool = False,
 ) -> frozenset[Capability]:
     """Section F: the overrides a classifier cannot argue with."""
     caps = set(required)
     if features.has_image_input or features.has_scanned_pages:
         caps.add(Capability.VISION)
-    if features.has_code_input or intent is TaskIntent.CODE:
+    if features.has_code_input or intent is TaskIntent.CODE or is_coding_task:
         caps.add(Capability.CODING)
     if features.estimated_input_tokens > LONG_CONTEXT_TOKEN_THRESHOLD:
         caps.add(Capability.LONG_CONTEXT)
@@ -162,8 +182,10 @@ def apply_deterministic_overrides(
     return frozenset(caps)
 
 
-def infer_intent(prompt: str, features: TaskFeatures) -> TaskIntent:
+def infer_intent(prompt: str, features: TaskFeatures, *, is_coding_task: bool = False) -> TaskIntent:
     """Keyword-lexicon intent inference. The deterministic fallback."""
+    if is_coding_task:
+        return TaskIntent.CODE
     lowered = prompt.lower()
     best_intent = TaskIntent.UNKNOWN
     best_hits = 0
@@ -211,7 +233,15 @@ class TaskClassifier(Protocol):
     name: str
 
     async def classify(
-        self, task_id: str, prompt: str, attachments: Sequence[Attachment] = ()
+        self,
+        task_id: str,
+        prompt: str,
+        attachments: Sequence[Attachment] = (),
+        *,
+        extra_input_chars: int = 0,
+        original_prompt: str | None = None,
+        enhanced_prompt: str | None = None,
+        is_coding_task: bool = False,
     ) -> TaskSpec: ...
 
 
@@ -225,17 +255,31 @@ class LexiconTaskClassifier:
     name = "lexicon"
 
     async def classify(
-        self, task_id: str, prompt: str, attachments: Sequence[Attachment] = ()
+        self,
+        task_id: str,
+        prompt: str,
+        attachments: Sequence[Attachment] = (),
+        *,
+        extra_input_chars: int = 0,
+        original_prompt: str | None = None,
+        enhanced_prompt: str | None = None,
+        is_coding_task: bool = False,
     ) -> TaskSpec:
-        features = extract_features(prompt, attachments)
-        intent = infer_intent(prompt, features)
-        required = apply_deterministic_overrides(frozenset(), features, intent)
+        eval_prompt = original_prompt or prompt
+        features = extract_features(eval_prompt, attachments, extra_input_chars=extra_input_chars)
+        intent = infer_intent(eval_prompt, features, is_coding_task=is_coding_task)
+        required = apply_deterministic_overrides(
+            frozenset(), features, intent, is_coding_task=is_coding_task
+        )
         preferred = INTENT_PREFERRED_CAPS.get(intent, frozenset()) - required
         return TaskSpec(
             task_id=task_id,
             prompt=prompt,
+            original_prompt=original_prompt or prompt,
+            enhanced_prompt=enhanced_prompt or prompt,
+            is_coding_task=is_coding_task or (intent == TaskIntent.CODE),
             intent=intent,
-            complexity=infer_complexity(prompt, features, intent),
+            complexity=infer_complexity(eval_prompt, features, intent),
             required_caps=required,
             preferred_caps=preferred,
             features=features,

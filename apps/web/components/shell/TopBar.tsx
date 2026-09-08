@@ -1,15 +1,37 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { HexLogo } from '../primitives/HexLogo';
 import { useShellStore } from '../../stores/shellStore';
+import { useAuthStore } from '../../stores/authStore';
 import { ChevronDown, ShieldCheck, Command } from 'lucide-react';
-import { MOCK_MODELS } from '../../lib/mockData';
+import { api } from '../../lib/api';
+import type { ModelRead } from '../../lib/types';
 
 export const TopBar: React.FC = () => {
   const { activeModelId, activeModelName, setActiveModel, setCommandPaletteOpen } = useShellStore();
+  const { currentUser } = useAuthStore();
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [models, setModels] = useState<ModelRead[]>([]);
+  const [residentIds, setResidentIds] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (!dropdownOpen) return;
+    let cancelled = false;
+    Promise.all([api.getModels({ enabled_only: true }), api.getModelResidency()])
+      .then(([modelList, residency]) => {
+        if (cancelled) return;
+        setModels(modelList);
+        setResidentIds(new Set(residency.entries.map((e) => e.model_id).filter((id): id is string => !!id)));
+      })
+      .catch(() => {
+        if (!cancelled) setModels([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [dropdownOpen]);
 
   return (
     <header className="h-14 bg-bg-panel border-b border-border px-4 flex items-center justify-between z-30 flex-shrink-0">
@@ -30,16 +52,19 @@ export const TopBar: React.FC = () => {
           className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-bg-elevated border border-border hover:border-border-strong text-text-primary text-sm font-mono transition-colors"
         >
           <span className="w-2 h-2 rounded-full bg-ok animate-pulse" />
-          <span className="font-medium">{activeModelName}</span>
+          <span className="font-medium">{activeModelName ?? 'Auto-routed'}</span>
           <ChevronDown className="w-3.5 h-3.5 text-text-tertiary" />
         </button>
 
         {dropdownOpen && (
-          <div className="absolute top-full mt-1.5 left-1/2 -translate-x-1/2 w-72 bg-bg-elevated border border-border shadow-xl rounded-md py-1.5 z-50">
+          <div className="absolute top-full mt-1.5 left-1/2 -translate-x-1/2 w-72 bg-bg-elevated border border-border shadow-xl rounded-md py-1.5 z-50 max-h-96 overflow-y-auto">
             <div className="px-3 py-1 border-b border-border text-xs font-mono text-text-tertiary uppercase">
-              Installed Open Models
+              Registered Models
             </div>
-            {MOCK_MODELS.map((model) => (
+            {models.length === 0 && (
+              <div className="px-3 py-3 text-xs text-text-tertiary font-mono">No models registered.</div>
+            )}
+            {models.map((model) => (
               <button
                 key={model.id}
                 onClick={() => {
@@ -52,9 +77,11 @@ export const TopBar: React.FC = () => {
               >
                 <div>
                   <div className="font-medium text-text-primary">{model.display_name}</div>
-                  <div className="text-xs font-mono text-text-tertiary">{model.device.toUpperCase()} · {model.vram_gb} GB</div>
+                  <div className="text-xs font-mono text-text-tertiary">
+                    {model.device.toUpperCase()} · {model.vram_gb} GB
+                  </div>
                 </div>
-                {model.is_resident && (
+                {residentIds.has(model.id) && (
                   <span className="text-xs font-mono px-1.5 py-0.5 rounded bg-ok-muted text-ok border border-ok/30">
                     RESIDENT
                   </span>
@@ -82,15 +109,32 @@ export const TopBar: React.FC = () => {
         </div>
 
         {/* User Pill */}
-        <Link href="/login" className="flex items-center gap-2.5 pl-1.5 pr-2.5 py-1 rounded-full hover:bg-bg-elevated transition-colors border border-transparent hover:border-border">
-          <div className="w-7 h-7 rounded-full bg-[#1E3A8A] border border-[#3B82F6]/40 flex items-center justify-center text-white text-xs font-semibold">
-            A
-          </div>
-          <div className="hidden sm:flex flex-col text-left">
-            <span className="text-sm font-medium text-text-primary leading-tight">Admin</span>
-            <span className="text-xs font-mono text-text-tertiary leading-none">PSU Network</span>
-          </div>
-        </Link>
+        {currentUser ? (
+          <Link
+            href={currentUser.role === 'admin' ? '/admin/users' : '/settings'}
+            className="flex items-center gap-2.5 pl-1.5 pr-2.5 py-1 rounded-full hover:bg-bg-elevated transition-colors border border-transparent hover:border-border"
+            title={`Signed in as ${currentUser.username} (${currentUser.role})`}
+          >
+            <div className="w-7 h-7 rounded-full bg-blue-900/60 border border-blue-500/40 flex items-center justify-center text-blue-200 text-xs font-semibold">
+              {currentUser.username.charAt(0).toUpperCase()}
+            </div>
+            <div className="hidden sm:flex flex-col text-left">
+              <span className="text-xs font-semibold text-text-primary leading-tight truncate max-w-[120px]">
+                {currentUser.display_name || currentUser.username}
+              </span>
+              <span className="text-[10px] font-mono text-text-tertiary uppercase leading-none">
+                {currentUser.role}
+              </span>
+            </div>
+          </Link>
+        ) : (
+          <Link
+            href="/login"
+            className="text-xs text-accent hover:underline font-mono px-2 py-1"
+          >
+            Sign In
+          </Link>
+        )}
       </div>
     </header>
   );

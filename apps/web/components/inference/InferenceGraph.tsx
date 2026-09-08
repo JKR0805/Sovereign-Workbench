@@ -1,337 +1,450 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
-  Cpu,
-  Database,
-  ShieldCheck,
   Sparkles,
-  Search,
   CheckCircle2,
-  Layers,
-  ArrowRight,
-  Terminal,
-  Activity,
-  FileText,
-  Lock,
+  XCircle,
+  ShieldCheck,
+  ShieldAlert,
+  ShieldQuestion,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  AlertTriangle,
 } from 'lucide-react';
+import { api } from '../../lib/api';
+import { MessageCitation, RunAttachment, WireEvent } from '../../lib/types';
 
 export interface InferenceGraphProps {
   prompt: string;
-  attachmentName?: string;
+  attachments?: RunAttachment[];
+  conversationId?: string;
+  onToken?: (token: string) => void;
+  onModelSelected?: (modelId: string, displayName: string) => void;
   onComplete: (result: {
-    selectedModel: string;
-    modelScore: number;
-    intent: string;
-    toolUsed: string;
-    citations: string[];
+    selectedModelId: string | null;
+    selectedModelName: string;
+    score: number | null;
+    intent: string | null;
+    citations: MessageCitation[];
     replyText: string;
+    promptTokens: number | null;
+    completionTokens: number | null;
+    tokensPerSec: number | null;
+    durationMs: number;
+    verification: string | null;
   }) => void;
+  onFailed: (error: { message: string; code?: string }) => void;
 }
 
-interface StepState {
-  id: string;
-  title: string;
-  subtitle: string;
-  status: 'pending' | 'active' | 'completed';
-  latencyMs?: number;
-  details?: React.ReactNode;
+type NodeStatus = 'pending' | 'active' | 'completed' | 'failed';
+
+interface CandidateInfo {
+  modelId: string;
+  score: number;
+  resident: boolean;
+}
+
+interface NodeState {
+  status: NodeStatus;
+  durationMs: number | null;
+  error?: string;
+}
+
+const NODE_ORDER = ['intake', 'vision', 'retrieve', 'classify', 'execute', 'verify'] as const;
+type NodeId = (typeof NODE_ORDER)[number];
+
+const NODE_TITLES: Record<NodeId, string> = {
+  intake: 'Attachment Intake & Table Extraction',
+  vision: 'Vision & Multimodal Fallback',
+  retrieve: 'Knowledge Retrieval (RAG)',
+  classify: 'Task Classification & Model Selection',
+  execute: 'Target Model Execution',
+  verify: 'Sovereignty Verification',
+};
+
+function initialNodeStates(): Record<NodeId, NodeState> {
+  const state = {} as Record<NodeId, NodeState>;
+  for (const id of NODE_ORDER) state[id] = { status: 'pending', durationMs: null };
+  return state;
 }
 
 export const InferenceGraph: React.FC<InferenceGraphProps> = ({
   prompt,
-  attachmentName,
+  attachments,
+  conversationId,
+  onToken,
+  onModelSelected,
   onComplete,
+  onFailed,
 }) => {
-  const [currentStepIndex, setCurrentStepIndex] = useState(0);
-  const [selectedCandidate, setSelectedCandidate] = useState<string | null>(null);
+  const [nodeStates, setNodeStates] = useState<Record<NodeId, NodeState>>(initialNodeStates);
   const [expandedDetails, setExpandedDetails] = useState(true);
+  const [streamedText, setStreamedText] = useState('');
+  const [tokenCount, setTokenCount] = useState(0);
+  const [tokensPerSec, setTokensPerSec] = useState<number | null>(null);
+  const [intent, setIntent] = useState<string | null>(null);
+  const [candidates, setCandidates] = useState<CandidateInfo[]>([]);
+  const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
+  const [selectedModelName, setSelectedModelName] = useState<string | null>(null);
+  const [rejectedCount, setRejectedCount] = useState<number | null>(null);
+  const [retrievalSummary, setRetrievalSummary] = useState<{
+    scope: string;
+    chunkCount: number;
+    grounded: boolean;
+  } | null>(null);
+  const [skippedAttachments, setSkippedAttachments] = useState<{ filename: string; reason: string }[]>([]);
+  const [visionSummary, setVisionSummary] = useState<{
+    modelId: string;
+    imageCount: number;
+    descriptionChars: number | null;
+  } | null>(null);
+  const [promptEnhanced, setPromptEnhanced] = useState<{
+    originalPrompt: string;
+    enhancedPrompt: string;
+    isCodingTask: boolean;
+    intent: string;
+    source: string;
+  } | null>(null);
+  const [extractedFiles, setExtractedFiles] = useState<{
+    filename: string;
+    chunkCount: number;
+    summary: string | null;
+    requiresMultimodal: boolean;
+  }[]>([]);
+  const [multimodalFallback, setMultimodalFallback] = useState<boolean>(false);
+  const [verdict, setVerdict] = useState<string | null>(null);
+  const [laggedWarning, setLaggedWarning] = useState(false);
 
-  const isVision =
-    attachmentName?.endsWith('.pdf') ||
-    attachmentName?.endsWith('.png') ||
-    prompt.toLowerCase().includes('report') ||
-    prompt.toLowerCase().includes('thickness') ||
-    prompt.toLowerCase().includes('image') ||
-    prompt.toLowerCase().includes('diagram');
+  const hasFinishedRef = useRef(false);
+  const startTimeRef = useRef(Date.now());
+  const chunksRef = useRef<string[]>([]);
+  const tokenStartRef = useRef(0);
 
-  const isCode =
-    prompt.toLowerCase().includes('code') ||
-    prompt.toLowerCase().includes('python') ||
-    prompt.toLowerCase().includes('telemetry') ||
-    prompt.toLowerCase().includes('sensor') ||
-    prompt.toLowerCase().includes('csv');
+  const onTokenRef = useRef(onToken);
+  onTokenRef.current = onToken;
+  const onModelSelectedRef = useRef(onModelSelected);
+  onModelSelectedRef.current = onModelSelected;
+  const onCompleteRef = useRef(onComplete);
+  onCompleteRef.current = onComplete;
+  const onFailedRef = useRef(onFailed);
+  onFailedRef.current = onFailed;
 
-  const intent = isVision
-    ? 'multimodal_doc_inspection'
-    : isCode
-    ? 'telemetry_code_synthesis'
-    : 'general_domain_reasoning';
-
-  const winningModel = isVision
-    ? 'Qwen 2.5 VL 72B'
-    : isCode
-    ? 'Llama 3.1 70B'
-    : 'Qwen 3 8B (Reasoning)';
-
-  const winningModelId = isVision
-    ? 'qwen2-vl-72b'
-    : isCode
-    ? 'llama-3-1-70b'
-    : 'general-reasoning';
-
-  const winningScore = isVision ? 94.8 : isCode ? 93.6 : 91.2;
-
-  const toolName = isVision
-    ? 'knowledge_vector_search'
-    : isCode
-    ? 'sandbox_python_executor'
-    : 'local_rag_citation_retriever';
-
-  const citations = useMemo(
-    () =>
-      isVision
-        ? ['e102_report.md (p.1 - Wall Thickness: 6.8mm)', 'Refinery_Safety_Manual.pdf (p.12 - ESD Protocol)']
-        : isCode
-        ? ['equipment_telemetry.csv (Row 4200 - Alert Threshold 340°C)']
-        : ['Local On-Premise Knowledge Base'],
-    [isVision, isCode]
-  );
-
-  const replyText = isVision
-    ? `Based on the refinery inspection manual and e102_report.md:
-
-1. Measured Wall Thickness:
-   • Measured: 6.8 mm across all tube passes.
-   • ASME Section VIII retirement threshold: 5.0 mm minimum.
-   • Safety Margin: +1.8 mm (+36% above minimum allowable threshold).
-
-2. Protocol Determination:
-   • The equipment complies with active operational integrity requirements.
-   • Recommend routine non-destructive examination scheduled in 12 months.`
-    : isCode
-    ? `Based on telemetry data analysis for Distillation Column DC-101:
-
-1. Anomaly Profile:
-   • Operating temperature reached 352.4°C at timestamp T-14:20:00 (Exceeds 350°C critical threshold).
-   • High frequency vibration detected in upper bearing housing.
-
-2. Automated Safety Intervention:
-   • Emergency Shutdown System (ESD) isolation triggered.
-   • Feed supply cut within 18.2 seconds.`
-    : `Task evaluated locally on sovereign infrastructure using ${winningModel}.
-
-All embeddings, mathematical arbitration, and token synthesis executed within your airgapped hardware perimeter with zero external network transmission.`;
-
-  // Step progression sequence
   useEffect(() => {
-    const t1 = setTimeout(() => {
-      setCurrentStepIndex(1); // Routing & Candidate Arbitration
-      setSelectedCandidate(winningModelId);
-    }, 600);
+    let unsubscribe: (() => void) | null = null;
+    let cancelled = false;
 
-    const t2 = setTimeout(() => {
-      setCurrentStepIndex(2); // Tool Calling & Vector Retrieval
-    }, 1400);
+    function fail(message: string, code?: string) {
+      if (hasFinishedRef.current || cancelled) return;
+      hasFinishedRef.current = true;
+      if (unsubscribe) {
+        try {
+          unsubscribe();
+        } catch {
+          /* already closed */
+        }
+      }
+      onFailedRef.current({ message, code });
+    }
 
-    const t3 = setTimeout(() => {
-      setCurrentStepIndex(3); // Sovereignty & AST Guard Verification
-    }, 2200);
+    function setNode(id: NodeId, patch: Partial<NodeState>) {
+      setNodeStates((prev) => ({ ...prev, [id]: { ...prev[id], ...patch } }));
+    }
 
-    const t4 = setTimeout(() => {
-      setCurrentStepIndex(4); // Synthesis Complete
-    }, 2900);
+    async function run() {
+      startTimeRef.current = Date.now();
+      let runId: string;
+      try {
+        const created = await api.createRun(prompt, attachments ?? [], 'agent', {
+          conversationId,
+        });
+        runId = created.run_id;
+      } catch (err) {
+        fail(err instanceof Error ? err.message : 'Failed to start the run.');
+        return;
+      }
+      if (cancelled) return;
 
-    const t5 = setTimeout(() => {
-      onComplete({
-        selectedModel: winningModel,
-        modelScore: winningScore,
-        intent,
-        toolUsed: toolName,
-        citations,
-        replyText,
-      });
-    }, 3500);
+      unsubscribe = api.subscribeToRunEvents(
+        runId,
+        (event: WireEvent) => {
+          if (cancelled || hasFinishedRef.current) return;
+
+          switch (event.type) {
+            case 'NODE_ENTERED': {
+              const nodeId = event.node_id as NodeId | undefined;
+              if (nodeId && NODE_ORDER.includes(nodeId)) {
+                setNode(nodeId, { status: 'active' });
+                if (nodeId === 'execute') tokenStartRef.current = Date.now();
+              }
+              break;
+            }
+
+            case 'NODE_COMPLETED': {
+              const nodeId = event.node_id as NodeId | undefined;
+              if (nodeId && NODE_ORDER.includes(nodeId)) {
+                setNode(nodeId, {
+                  status: 'completed',
+                  durationMs: event.duration_ms ?? null,
+                });
+                if (nodeId === 'verify' && typeof event.payload?.verdict === 'string') {
+                  setVerdict(event.payload.verdict);
+                }
+              }
+              break;
+            }
+
+            case 'NODE_FAILED': {
+              const nodeId = event.node_id as NodeId | undefined;
+              if (nodeId && NODE_ORDER.includes(nodeId)) {
+                setNode(nodeId, { status: 'failed', error: String(event.payload?.error ?? '') });
+              }
+              break;
+            }
+
+            case 'ATTACHMENT_SKIPPED':
+              setSkippedAttachments((prev) => [
+                ...prev,
+                {
+                  filename: String(event.payload?.filename ?? 'unknown'),
+                  reason: String(event.payload?.reason ?? 'not indexed'),
+                },
+              ]);
+              break;
+
+            case 'EXTRACTION_COMPLETED':
+              setExtractedFiles((prev) => [
+                ...prev,
+                {
+                  filename: String(event.payload?.filename ?? ''),
+                  chunkCount: Number(event.payload?.chunk_count ?? 0),
+                  summary: typeof event.payload?.summary === 'string' ? event.payload.summary : null,
+                  requiresMultimodal: Boolean(event.payload?.requires_multimodal),
+                },
+              ]);
+              break;
+
+            case 'MULTIMODAL_FALLBACK':
+              setMultimodalFallback(true);
+              break;
+
+            case 'VISION_ANALYSIS_STARTED':
+              setVisionSummary({
+                modelId: String(event.payload?.model_id ?? ''),
+                imageCount: Number(event.payload?.image_count ?? 0),
+                descriptionChars: null,
+              });
+              break;
+
+            case 'VISION_ANALYSIS_COMPLETED':
+              setVisionSummary((prev) => ({
+                modelId: String(event.payload?.model_id ?? prev?.modelId ?? ''),
+                imageCount: prev?.imageCount ?? 0,
+                descriptionChars: Number(event.payload?.description_chars ?? 0),
+              }));
+              break;
+
+            case 'PROMPT_ENHANCED':
+              setPromptEnhanced({
+                originalPrompt: String(event.payload?.original_prompt ?? ''),
+                enhancedPrompt: String(event.payload?.enhanced_prompt ?? ''),
+                isCodingTask: Boolean(event.payload?.is_coding_task),
+                intent: String(event.payload?.intent ?? ''),
+                source: String(event.payload?.source ?? 'general_model'),
+              });
+              if (typeof event.payload?.intent === 'string') {
+                setIntent(event.payload.intent);
+              }
+              break;
+
+            case 'TASK_CLASSIFIED':
+              setIntent(typeof event.payload?.intent === 'string' ? event.payload.intent : null);
+              if (typeof event.payload?.is_coding_task === 'boolean') {
+                setPromptEnhanced((prev) =>
+                  prev
+                    ? { ...prev, isCodingTask: Boolean(event.payload.is_coding_task) }
+                    : {
+                        originalPrompt: prompt,
+                        enhancedPrompt: prompt,
+                        isCodingTask: Boolean(event.payload.is_coding_task),
+                        intent: String(event.payload?.intent ?? ''),
+                        source: 'router',
+                      }
+                );
+              }
+              break;
+
+            case 'MODEL_CANDIDATES': {
+              const raw = Array.isArray(event.payload?.candidates) ? event.payload.candidates : [];
+              setCandidates(
+                raw.map((c: any) => ({
+                  modelId: String(c.model_id),
+                  score: Number(c.score ?? 0),
+                  resident: Boolean(c.resident),
+                }))
+              );
+              const rejected = Array.isArray(event.payload?.rejected) ? event.payload.rejected.length : null;
+              setRejectedCount(rejected);
+              break;
+            }
+
+            case 'MODEL_SELECTED': {
+              const modelId = typeof event.payload?.model_id === 'string' ? event.payload.model_id : null;
+              const displayName =
+                typeof event.payload?.display_name === 'string' ? event.payload.display_name : modelId;
+              setSelectedModelId(modelId);
+              setSelectedModelName(displayName);
+              if (modelId && displayName) onModelSelectedRef.current?.(modelId, displayName);
+              break;
+            }
+
+            case 'RAG_RESULTS':
+              setRetrievalSummary({
+                scope: typeof event.payload?.scope === 'string' ? event.payload.scope : 'corpus',
+                chunkCount: Number(event.payload?.chunk_count ?? 0),
+                grounded: Boolean(event.payload?.grounded),
+              });
+              break;
+
+            case 'LLM_TOKEN': {
+              const token = typeof event.payload?.token === 'string' ? event.payload.token : '';
+              chunksRef.current.push(token);
+              setTokenCount((c) => c + 1);
+              setStreamedText((prev) => prev + token);
+              onTokenRef.current?.(token);
+              if (tokenStartRef.current > 0) {
+                const elapsedSec = (Date.now() - tokenStartRef.current) / 1000;
+                if (elapsedSec > 0.3) {
+                  setTokensPerSec(chunksRef.current.length / elapsedSec);
+                }
+              }
+              break;
+            }
+
+            case 'RUN_COMPLETED': {
+              if (hasFinishedRef.current) return;
+              hasFinishedRef.current = true;
+              if (unsubscribe) {
+                try {
+                  unsubscribe();
+                } catch {
+                  /* already closed */
+                }
+                unsubscribe = null;
+              }
+              const payload = event.payload ?? {};
+              const replyText =
+                typeof payload.reply === 'string' && payload.reply.length > 0
+                  ? payload.reply
+                  : chunksRef.current.join('');
+              const citations: MessageCitation[] = Array.isArray(payload.citations)
+                ? payload.citations
+                : [];
+              const modelsUsed = Array.isArray(payload.models_used) ? payload.models_used : [];
+              const durationMs =
+                typeof payload.duration_ms === 'number'
+                  ? payload.duration_ms
+                  : Date.now() - startTimeRef.current;
+
+              setTimeout(() => {
+                if (cancelled) return;
+                onCompleteRef.current({
+                  selectedModelId: modelsUsed[0] ?? selectedModelId,
+                  selectedModelName: selectedModelName ?? modelsUsed[0] ?? 'model',
+                  score: null,
+                  intent,
+                  citations,
+                  replyText,
+                  promptTokens: typeof payload.prompt_tokens === 'number' ? payload.prompt_tokens : null,
+                  completionTokens:
+                    typeof payload.completion_tokens === 'number' ? payload.completion_tokens : null,
+                  tokensPerSec: typeof payload.tokens_per_sec === 'number' ? payload.tokens_per_sec : tokensPerSec,
+                  durationMs,
+                  verification: typeof payload.verification === 'string' ? payload.verification : verdict,
+                });
+              }, 250);
+              break;
+            }
+
+            case 'RUN_FAILED':
+              fail(String(event.payload?.error ?? 'The run failed.'), String(event.payload?.code ?? ''));
+              break;
+          }
+        },
+        () => fail('Lost connection to the run stream.'),
+        {
+          onLagged: () => {
+            // The subscriber's queue overflowed and the server dropped
+            // events for this connection only. Nothing was lost from the
+            // durable log -- GET /api/runs/{id}/steps and /events?since=
+            // can still reconstruct the full picture -- but this stream's
+            // live view may now be behind, so say so rather than silently
+            // showing a stale graph.
+            setLaggedWarning(true);
+          },
+        }
+      );
+    }
+
+    run();
 
     return () => {
-      clearTimeout(t1);
-      clearTimeout(t2);
-      clearTimeout(t3);
-      clearTimeout(t4);
-      clearTimeout(t5);
+      cancelled = true;
+      if (unsubscribe) unsubscribe();
     };
-  }, [winningModelId, onComplete, winningModel, winningScore, intent, toolName, citations, replyText]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prompt, conversationId]);
 
-  const steps: StepState[] = [
-    {
-      id: 'classify',
-      title: 'Task Ingestion & Intent Classification',
-      subtitle: `Classified as: ${intent.toUpperCase()} · ~2,400 Tokens`,
-      status: currentStepIndex > 0 ? 'completed' : currentStepIndex === 0 ? 'active' : 'pending',
-      latencyMs: 14.2,
-      details: (
-        <div className="flex flex-wrap gap-2 text-xs font-mono">
-          <span className="px-2 py-0.5 rounded bg-bg-elevated border border-border text-text-secondary">
-            Input: {prompt.slice(0, 48)}...
-          </span>
-          {attachmentName && (
-            <span className="px-2 py-0.5 rounded bg-accent/15 text-accent border border-accent/30 font-medium">
-              📎 {attachmentName}
-            </span>
-          )}
-          <span className="px-2 py-0.5 rounded bg-ok-muted text-ok border border-ok/30 font-medium">
-            Intent: {intent}
-          </span>
-        </div>
-      ),
-    },
-    {
-      id: 'route',
-      title: 'Neural Model Arbitration & Residency Match',
-      subtitle: `Evaluating local model matrix · Target locked: ${winningModel}`,
-      status: currentStepIndex > 1 ? 'completed' : currentStepIndex === 1 ? 'active' : 'pending',
-      latencyMs: 8.5,
-      details: (
-        <div className="flex flex-col gap-2 mt-1">
-          <div className="text-xs font-mono text-text-tertiary">
-            Multi-factor candidate scoring shootout:
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 font-mono text-xs">
-            <div
-              className={`p-2 rounded border transition-all ${
-                winningModelId === 'qwen2-vl-72b'
-                  ? 'border-accent bg-accent/10 text-accent font-semibold'
-                  : 'border-border bg-bg-elevated text-text-tertiary'
-              }`}
-            >
-              <div className="flex items-center justify-between">
-                <span>Qwen 2.5 VL 72B</span>
-                <span>94.8</span>
-              </div>
-              <div className="text-xs text-text-secondary mt-0.5">Vision + Doc specialist</div>
-            </div>
-
-            <div
-              className={`p-2 rounded border transition-all ${
-                winningModelId === 'llama-3-1-70b'
-                  ? 'border-accent bg-accent/10 text-accent font-semibold'
-                  : 'border-border bg-bg-elevated text-text-tertiary'
-              }`}
-            >
-              <div className="flex items-center justify-between">
-                <span>Llama 3.1 70B</span>
-                <span>93.6</span>
-              </div>
-              <div className="text-xs text-text-secondary mt-0.5">Code & telemetry logic</div>
-            </div>
-
-            <div
-              className={`p-2 rounded border transition-all ${
-                winningModelId === 'general-reasoning'
-                  ? 'border-accent bg-accent/10 text-accent font-semibold'
-                  : 'border-border bg-bg-elevated text-text-tertiary'
-              }`}
-            >
-              <div className="flex items-center justify-between">
-                <span>Qwen 3 8B</span>
-                <span>91.2</span>
-              </div>
-              <div className="text-xs text-text-secondary mt-0.5">Resident in VRAM (5.2GB)</div>
-            </div>
-          </div>
-        </div>
-      ),
-    },
-    {
-      id: 'tools',
-      title: 'Tool Invocation & Vector Retrieval',
-      subtitle: `Dispatched tool: ${toolName} · 0 External Calls`,
-      status: currentStepIndex > 2 ? 'completed' : currentStepIndex === 2 ? 'active' : 'pending',
-      latencyMs: 46.8,
-      details: (
-        <div className="flex flex-col gap-1 text-xs font-mono">
-          <div className="flex items-center gap-2 text-ok font-medium">
-            <CheckCircle2 className="w-3.5 h-3.5" />
-            <span>Retrieved Grounded Citations from Local Qdrant / SQLite</span>
-          </div>
-          <div className="flex flex-wrap gap-2 mt-1">
-            {citations.map((c, i) => (
-              <span
-                key={i}
-                className="px-2 py-0.5 rounded bg-bg-elevated border border-border text-text-primary text-xs"
-              >
-                [C{i + 1}] {c}
-              </span>
-            ))}
-          </div>
-        </div>
-      ),
-    },
-    {
-      id: 'guard',
-      title: 'Airgap Verification & AST Process Guard',
-      subtitle: 'Verified: 0 external sockets · Isolated kernel namespace',
-      status: currentStepIndex > 3 ? 'completed' : currentStepIndex === 3 ? 'active' : 'pending',
-      latencyMs: 2.1,
-      details: (
-        <div className="flex items-center gap-4 text-xs font-mono text-text-secondary">
-          <span className="flex items-center gap-1.5 text-ok font-semibold">
-            <ShieldCheck className="w-3.5 h-3.5" />
-            <span>SOVEREIGN BOUNDARY ENFORCED</span>
-          </span>
-          <span>·</span>
-          <span>RFC1918 / Loopback Only</span>
-          <span>·</span>
-          <span>0 Egress Drops</span>
-        </div>
-      ),
-    },
-  ];
+  const activeIndex = NODE_ORDER.findIndex((id) => nodeStates[id].status === 'active');
+  const isDone = NODE_ORDER.every((id) => nodeStates[id].status === 'completed');
 
   return (
-    <div className="bg-bg-panel border border-accent/40 rounded-lg shadow-lg overflow-hidden my-4 transition-all duration-300">
-      {/* Top Header Bar */}
+    <div className="bg-bg-panel border border-accent/40 rounded-lg shadow-lg overflow-hidden my-4">
       <div className="bg-bg-elevated px-4 py-3 border-b border-border flex items-center justify-between">
         <div className="flex items-center gap-2.5">
-          <div className="w-2.5 h-2.5 rounded-full bg-accent animate-ping" />
+          <div className={`w-2.5 h-2.5 rounded-full bg-accent ${isDone ? '' : 'animate-ping'}`} />
           <span className="font-mono text-xs uppercase tracking-wider text-accent font-bold">
-            Dynamic AI Inference Pipeline · Assembling Task DAG
+            Inference Pipeline · Local Execution
           </span>
         </div>
-
         <div className="flex items-center gap-3">
-          <span className="font-mono text-xs text-text-tertiary hidden sm:inline">
-            Active Model: <strong className="text-text-primary font-medium">{winningModel}</strong>
-          </span>
+          {selectedModelName && (
+            <span className="font-mono text-xs text-text-tertiary hidden sm:inline">
+              Model: <strong className="text-text-primary font-medium">{selectedModelName}</strong>
+            </span>
+          )}
           <button
             onClick={() => setExpandedDetails(!expandedDetails)}
             className="text-text-tertiary hover:text-text-primary transition-colors p-1"
             title={expandedDetails ? 'Collapse pipeline steps' : 'Expand pipeline steps'}
           >
-            {expandedDetails ? (
-              <ChevronUp className="w-4 h-4" />
-            ) : (
-              <ChevronDown className="w-4 h-4" />
-            )}
+            {expandedDetails ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
           </button>
         </div>
       </div>
 
-      {/* Pipeline DAG Visualization */}
+      {laggedWarning && (
+        <div className="px-4 py-2 bg-warn/10 border-b border-warn/30 text-xs font-mono text-warn flex items-center gap-2">
+          <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
+          Event stream fell behind; some intermediate updates may be missing from this view. The
+          run itself continues correctly.
+        </div>
+      )}
+
       <div className="p-4 flex flex-col gap-3">
-        {steps.map((step, idx) => {
-          const isActive = step.status === 'active';
-          const isCompleted = step.status === 'completed';
-          const isPending = step.status === 'pending';
+        {NODE_ORDER.map((nodeId, idx) => {
+          const node = nodeStates[nodeId];
+          const isActive = node.status === 'active';
+          const isCompleted = node.status === 'completed';
+          const isFailed = node.status === 'failed';
 
           return (
-            <div key={step.id} className="flex flex-col">
-              {/* Step Card */}
+            <div key={nodeId} className="flex flex-col">
               <div
-                className={`p-3 rounded-md border transition-all flex flex-col gap-2 ${
-                  isActive
+                className={`p-3 rounded-md border transition-colors duration-150 flex flex-col gap-2 ${
+                  isFailed
+                    ? 'border-error/60 bg-error/5'
+                    : isActive
                     ? 'border-accent bg-accent/5 shadow-sm'
                     : isCompleted
                     ? 'border-border bg-bg-panel'
@@ -340,9 +453,10 @@ All embeddings, mathematical arbitration, and token synthesis executed within yo
               >
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
-                    {/* Status Icon */}
                     <div className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0">
-                      {isCompleted ? (
+                      {isFailed ? (
+                        <XCircle className="w-4 h-4 text-error" />
+                      ) : isCompleted ? (
                         <CheckCircle2 className="w-4 h-4 text-ok" />
                       ) : isActive ? (
                         <div className="w-3.5 h-3.5 rounded-full border-2 border-accent border-t-transparent animate-spin" />
@@ -350,10 +464,9 @@ All embeddings, mathematical arbitration, and token synthesis executed within yo
                         <div className="w-2.5 h-2.5 rounded-full bg-border" />
                       )}
                     </div>
-
                     <div>
                       <div className="text-sm font-semibold text-text-primary font-mono flex items-center gap-2">
-                        <span>{step.title}</span>
+                        <span>{NODE_TITLES[nodeId]}</span>
                         {isActive && (
                           <span className="text-xs font-bold px-1.5 py-0.5 rounded bg-accent/20 text-accent uppercase">
                             Executing
@@ -361,44 +474,215 @@ All embeddings, mathematical arbitration, and token synthesis executed within yo
                         )}
                       </div>
                       <div className="text-xs text-text-secondary font-mono mt-0.5">
-                        {step.subtitle}
+                        {nodeId === 'intake' &&
+                          (extractedFiles.length > 0
+                            ? `${extractedFiles.length} file(s) ingested & parsed`
+                            : attachments && attachments.length > 0
+                            ? `${attachments.length} attachment(s)`
+                            : 'No attachments')}
+                        {nodeId === 'vision' &&
+                          (multimodalFallback
+                            ? 'Multimodal fallback activated: scanned / sparse text analyzed via vision'
+                            : visionSummary
+                            ? `${visionSummary.imageCount} image(s) described by ${visionSummary.modelId}${
+                                visionSummary.descriptionChars != null
+                                  ? ` (${visionSummary.descriptionChars} chars)`
+                                  : '...'
+                              }`
+                            : 'No visual inspection required')}
+                        {nodeId === 'retrieve' &&
+                          (retrievalSummary
+                            ? `${retrievalSummary.chunkCount} chunk(s) retrieved · scope: ${retrievalSummary.scope}`
+                            : 'Searching local knowledge base...')}
+                        {nodeId === 'classify' &&
+                          (promptEnhanced
+                            ? `${promptEnhanced.isCodingTask ? '💻 Coding Specialist Task' : '📖 General Intelligence Task'}${
+                                intent ? ` · ${intent}` : ''
+                              }`
+                            : intent
+                            ? `Intent: ${intent}`
+                            : 'Classifying and routing...')}
+                        {nodeId === 'execute' &&
+                          `${tokenCount > 0 ? `${tokenCount} tokens streamed` : 'Generating...'}`}
+                        {nodeId === 'verify' && verdict && `Verdict: ${verdict}`}
                       </div>
                     </div>
                   </div>
-
                   <div className="font-mono text-xs text-text-tertiary">
-                    {isCompleted ? `${step.latencyMs}ms` : isActive ? 'Processing...' : 'Queued'}
+                    {isCompleted && node.durationMs != null
+                      ? `${node.durationMs.toFixed(1)}ms`
+                      : isActive
+                      ? 'Processing...'
+                      : isFailed
+                      ? 'Failed'
+                      : 'Queued'}
                   </div>
                 </div>
 
-                {/* Expanded Details Body */}
-                {expandedDetails && (isActive || isCompleted) && step.details && (
+                {expandedDetails && (isActive || isCompleted || isFailed) && (
                   <div className="pl-9 pt-1 border-t border-border/50 mt-1">
-                    {step.details}
+                    {nodeId === 'intake' && (
+                      <div className="flex flex-col gap-2">
+                        {skippedAttachments.length > 0 && (
+                          <div className="flex flex-col gap-1 text-xs font-mono">
+                            {skippedAttachments.map((s, i) => (
+                              <span key={i} className="text-warn">
+                                {s.filename}: {s.reason}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                        {extractedFiles.length > 0 && (
+                          <div className="flex flex-col gap-1.5 text-xs font-mono">
+                            {extractedFiles.map((f, i) => (
+                              <div key={i} className="p-2 rounded bg-bg-base border border-border/70 flex flex-col gap-1">
+                                <div className="flex items-center justify-between text-accent">
+                                  <span className="font-semibold truncate">{f.filename}</span>
+                                  <span className="text-[11px] text-text-tertiary">{f.chunkCount} chunks indexed</span>
+                                </div>
+                                {f.summary && (
+                                  <p className="text-text-secondary whitespace-pre-wrap text-[11px] leading-relaxed">
+                                    {f.summary}
+                                  </p>
+                                )}
+                                {f.requiresMultimodal && (
+                                  <span className="text-[10px] text-warn font-semibold">
+                                    ⚠️ Incomplete text / scanned pages detected &rarr; Vision fallback triggered
+                                  </span>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {nodeId === 'vision' && multimodalFallback && (
+                      <div className="p-2 rounded bg-warn/10 border border-warn/30 text-xs font-mono text-warn flex items-center gap-2">
+                        <Sparkles className="w-3.5 h-3.5 flex-shrink-0" />
+                        <span>Multimodal fallback: Scanned / sparse pages processed via vision model.</span>
+                      </div>
+                    )}
+                    {nodeId === 'retrieve' && promptEnhanced && promptEnhanced.enhancedPrompt && promptEnhanced.enhancedPrompt !== promptEnhanced.originalPrompt && (
+                      <div className="p-2 rounded bg-bg-base border border-border/70 text-xs font-mono text-text-secondary flex flex-col gap-1 mb-1">
+                        <div className="text-[10px] uppercase font-bold text-accent">Enriched Vector Retrieval Query:</div>
+                        <div className="text-text-primary text-[11px] italic">&ldquo;{promptEnhanced.enhancedPrompt}&rdquo;</div>
+                      </div>
+                    )}
+                    {nodeId === 'classify' && (
+                      <div className="flex flex-col gap-2">
+                        {promptEnhanced && (
+                          <div className="flex flex-wrap items-center gap-2 pb-2 border-b border-border/40 text-xs font-mono">
+                            <span className="text-text-tertiary">Task Domain:</span>
+                            <span
+                              className={`font-bold px-2 py-0.5 rounded text-[11px] ${
+                                promptEnhanced.isCodingTask
+                                  ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30'
+                                  : 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
+                              }`}
+                            >
+                              {promptEnhanced.isCodingTask ? '💻 Coding Specialist Task' : '📖 General Intelligence Task'}
+                            </span>
+                            <span className="text-text-tertiary">Understanding Source:</span>
+                            <span className="text-text-secondary italic">[{promptEnhanced.source}]</span>
+                          </div>
+                        )}
+                        {candidates.length > 0 && (
+                          <div className="flex flex-col gap-2 mt-1">
+                            <div className="text-xs font-mono text-text-tertiary">
+                              Candidate scoring{rejectedCount ? ` (${rejectedCount} rejected)` : ''}:
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 font-mono text-xs">
+                              {candidates.map((c) => {
+                                const isWinner = c.modelId === selectedModelId;
+                                return (
+                                  <div
+                                    key={c.modelId}
+                                    className={`p-2 rounded border transition-colors duration-150 ${
+                                      isWinner
+                                        ? 'border-accent bg-accent/10 text-accent font-semibold shadow-sm'
+                                        : 'border-border bg-bg-elevated text-text-tertiary'
+                                    }`}
+                                  >
+                                    <div className="flex items-center justify-between">
+                                      <span className="truncate">{c.modelId}</span>
+                                      <span>{c.score.toFixed(1)}</span>
+                                    </div>
+                                    <div className="text-xs text-text-secondary mt-0.5">
+                                      {c.resident ? 'Resident in VRAM' : 'Not resident'}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {nodeId === 'execute' && (
+                      <div className="flex flex-col gap-2 text-xs font-mono">
+                        <div className="flex items-center justify-between text-ok font-medium">
+                          <span className="flex items-center gap-1.5">
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            <span>Local generation{selectedModelName ? ` · ${selectedModelName}` : ''}</span>
+                          </span>
+                          {tokensPerSec != null && (
+                            <span className="text-accent font-bold">{tokensPerSec.toFixed(1)} tok/s</span>
+                          )}
+                        </div>
+                        {streamedText && (
+                          <div className="p-2 rounded bg-bg-base border border-border/80 text-text-secondary font-mono max-h-24 overflow-y-auto leading-relaxed whitespace-pre-wrap">
+                            {streamedText}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {nodeId === 'verify' && (
+                      <div className="flex items-center gap-2 text-xs font-mono text-text-secondary">
+                        {verdict === 'pass' && (
+                          <span className="flex items-center gap-1.5 text-ok font-semibold">
+                            <ShieldCheck className="w-3.5 h-3.5" />
+                            <span>SOVEREIGN BOUNDARY VERIFIED CLEAN</span>
+                          </span>
+                        )}
+                        {verdict === 'fail' && (
+                          <span className="flex items-center gap-1.5 text-error font-semibold">
+                            <ShieldAlert className="w-3.5 h-3.5" />
+                            <span>EGRESS DETECTED DURING RUN</span>
+                          </span>
+                        )}
+                        {(verdict === 'unverified' || !verdict) && isCompleted && (
+                          <span className="flex items-center gap-1.5 text-text-tertiary font-semibold">
+                            <ShieldQuestion className="w-3.5 h-3.5" />
+                            <span>NOT MEASURED (guard unavailable in this configuration)</span>
+                          </span>
+                        )}
+                      </div>
+                    )}
+                    {isFailed && node.error && (
+                      <div className="text-xs font-mono text-error">{node.error}</div>
+                    )}
                   </div>
                 )}
               </div>
 
-              {/* Connecting DAG Edge */}
-              {idx < steps.length - 1 && (
+              {idx < NODE_ORDER.length - 1 && (
                 <div className="ml-6 w-0.5 h-2 bg-border relative my-0.5">
-                  {isCompleted && (
-                    <div className="absolute inset-0 bg-ok animate-pulse" />
-                  )}
+                  {isCompleted && <div className="absolute inset-0 bg-ok animate-pulse" />}
                 </div>
               )}
             </div>
           );
         })}
 
-        {/* Synthesis indicator */}
-        {currentStepIndex >= 4 && (
+        {activeIndex === NODE_ORDER.indexOf('execute') && (
           <div className="p-3 rounded-md border border-ok/40 bg-ok/5 flex items-center justify-between text-xs font-mono text-ok animate-pulse">
             <div className="flex items-center gap-2">
               <Sparkles className="w-4 h-4" />
-              <span>Synthesizing Airgapped Deliverable · Streaming Tokens...</span>
+              <span>Synthesizing response · streaming live tokens...</span>
             </div>
-            <span className="font-bold">42.8 tokens/sec</span>
+            <span className="font-bold">
+              {tokensPerSec != null ? `${tokensPerSec.toFixed(1)} tok/s` : `${tokenCount} tokens`}
+            </span>
           </div>
         )}
       </div>

@@ -58,6 +58,9 @@ class TaskSpec(BaseModel):
 
     task_id: str
     prompt: str
+    original_prompt: str | None = None
+    enhanced_prompt: str | None = None
+    is_coding_task: bool = False
     intent: TaskIntent = TaskIntent.UNKNOWN
     domain: str | None = None
     complexity: TaskComplexity = TaskComplexity.MEDIUM

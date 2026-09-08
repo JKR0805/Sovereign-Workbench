@@ -53,10 +53,26 @@ class RouterEngine:
         self._default_weights = default_weights or ScoringWeights()
 
     async def classify(
-        self, task_id: str, prompt: str, attachments: Sequence[Attachment] = ()
+        self,
+        task_id: str,
+        prompt: str,
+        attachments: Sequence[Attachment] = (),
+        *,
+        extra_input_chars: int = 0,
+        original_prompt: str | None = None,
+        enhanced_prompt: str | None = None,
+        is_coding_task: bool = False,
     ) -> TaskSpec:
         """Stage 1. Delegates to the configured classifier."""
-        return await self._classifier.classify(task_id, prompt, attachments)
+        return await self._classifier.classify(
+            task_id,
+            prompt,
+            attachments,
+            extra_input_chars=extra_input_chars,
+            original_prompt=original_prompt,
+            enhanced_prompt=enhanced_prompt,
+            is_coding_task=is_coding_task,
+        )
 
     def route(
         self,

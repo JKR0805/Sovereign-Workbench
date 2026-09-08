@@ -65,6 +65,7 @@ class DocumentIngestor:
             for page in extracted.pages:
                 await self._events.emit_event(
                     EventType.PAGE_CLASSIFIED,
+                    run_id=request.run_id,
                     document_id=record.id,
                     page=page.page,
                     kind=page.kind.value,
@@ -84,6 +85,7 @@ class DocumentIngestor:
 
             await self._events.emit_event(
                 EventType.DOCUMENT_INGESTED,
+                run_id=request.run_id,
                 document_id=record.id,
                 filename=request.filename,
                 chunk_count=len(chunks),
@@ -98,6 +100,8 @@ class DocumentIngestor:
                 scanned_page_count=extracted.scanned_page_count,
                 parser=extracted.parser,
                 ingested_at=ingested_at,
+                extracted_summary=extracted.summary,
+                fallback_images=extracted.fallback_images,
             )
         except Exception as exc:
             await self._set_failed(record.id, str(exc))

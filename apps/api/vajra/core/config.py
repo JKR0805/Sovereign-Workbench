@@ -56,6 +56,9 @@ class DatabaseSettings(BaseModel):
     path: Path = Field(default_factory=lambda: _default_data_dir() / "sqlite" / "vajra.db")
     echo: bool = False
     busy_timeout_ms: int = 5_000
+    auto_migrate: bool = True
+    """Run the additive schema-sync helper on startup (new columns, not tables --
+    ``create_all`` already handles new tables). Never drops or retypes anything."""
 
     @property
     def url(self) -> str:
@@ -157,6 +160,11 @@ class SovereigntySettings(BaseModel):
     )
     # Destination used by POST /api/network/probe (the "Attempt External Call" button).
     probe_target_url: str = "https://api.openai.com/v1/models"
+    # Whether a run whose verify step measures a dirty egress verdict should be
+    # marked FAILED. Off by default: a library's background telemetry attempt
+    # should not destroy an otherwise-good answer; the verdict is still recorded
+    # and shown either way.
+    fail_run_on_egress: bool = False
 
 
 class SandboxSettings(BaseModel):
@@ -190,6 +198,10 @@ class RagSettings(BaseModel):
     retrieve_fused_limit: int = 20
     rerank_top_k: int = 5
     rrf_k: int = 60
+    max_attachment_mb: int = 25
+    """Inline (base64) run attachments larger than this are rejected before
+    decoding. Pre-uploaded attachments (``document_id``) are not limited here --
+    the knowledge upload endpoint is the place for that policy."""
 
 
 class AgentSettings(BaseModel):
@@ -199,6 +211,16 @@ class AgentSettings(BaseModel):
     max_tool_calls: int = 12
     max_wall_clock_s: float = 240.0
     max_repairs: int = 2
+
+
+class AuthSettings(BaseModel):
+    """Multi-user authentication and session configuration."""
+
+    session_idle_timeout_s: int = 12 * 3600  # 12 hours sliding idle
+    session_absolute_timeout_s: int = 30 * 24 * 3600  # 30 days absolute cap
+    cookie_name: str = "vajra_session"
+    cookie_secure: bool = False
+    bootstrap_admin_password: str | None = "sovereign2026"
 
 
 class Settings(BaseSettings):
@@ -226,6 +248,7 @@ class Settings(BaseSettings):
     sandbox: SandboxSettings = Field(default_factory=SandboxSettings)
     rag: RagSettings = Field(default_factory=RagSettings)
     agent: AgentSettings = Field(default_factory=AgentSettings)
+    auth: AuthSettings = Field(default_factory=AuthSettings)
 
     @property
     def fail_closed(self) -> bool:
