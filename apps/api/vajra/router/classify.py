@@ -67,13 +67,16 @@ INTENT_LEXICON: dict[TaskIntent, tuple[str, ...]] = {
         "extract", "read out", "list all", "tag numbers", "transcribe", "pull out",
         "identify the", "find all",
     ),
-    TaskIntent.SUMMARISE: ("summarise", "summarize", "tl;dr", "condense", "brief"),
+    TaskIntent.SUMMARISE: (
+        "summarise", "summarize", "tl;dr", "condense", "brief",
+        "describe", "describe the", "overview", "walk through", "outline", "tell me about",
+    ),
     TaskIntent.DOCUMENT_GENERATION: (
         "approval note", "generate a report", "draft a", "write a report", "prepare a note",
     ),
     TaskIntent.ANALYSE: (
         "analyse", "analyze", "assess", "evaluate", "compare", "interpret", "diagnose",
-        "root cause", "why",
+        "root cause", "why", "explain", "inspect", "review", "break down",
     ),
     TaskIntent.QUESTION_ANSWER: ("what", "when", "who", "where", "which", "how many"),
 }
@@ -83,13 +86,15 @@ INTENT_LEXICON: dict[TaskIntent, tuple[str, ...]] = {
 INTENT_PREFERRED_CAPS: dict[TaskIntent, frozenset[Capability]] = {
     TaskIntent.CODE: frozenset({Capability.CODING, Capability.STRUCTURED_OUTPUT}),
     TaskIntent.EXTRACT: frozenset({Capability.DOC_UNDERSTANDING, Capability.STRUCTURED_OUTPUT}),
-    TaskIntent.SUMMARISE: frozenset({Capability.TEXT, Capability.DOC_UNDERSTANDING}),
+    TaskIntent.SUMMARISE: frozenset(
+        {Capability.TEXT, Capability.DOC_UNDERSTANDING, Capability.REASONING}
+    ),
     TaskIntent.ANALYSE: frozenset({Capability.REASONING}),
     TaskIntent.DOCUMENT_GENERATION: frozenset(
         {Capability.REASONING, Capability.STRUCTURED_OUTPUT}
     ),
     TaskIntent.QUESTION_ANSWER: frozenset({Capability.TEXT, Capability.REASONING}),
-    TaskIntent.UNKNOWN: frozenset({Capability.TEXT}),
+    TaskIntent.UNKNOWN: frozenset({Capability.TEXT, Capability.REASONING}),
 }
 
 #: Above this estimate, a task needs a long-context model (Section F, stage 1).

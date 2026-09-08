@@ -99,15 +99,34 @@ def score_candidate(
     needed = spec.features.estimated_input_tokens if needed_tokens is None else needed_tokens
     resident = candidate.resident or candidate.model_id in context.resident_model_ids
 
+    raw_cap = capability_fit(candidate, spec.required_caps)
+    raw_pref = capability_fit(candidate, spec.preferred_caps)
+
+    # Specialization & role affinity:
+    # When a task is non-coding (is_coding_task is False and Capability.CODING is not required),
+    # a model specialized exclusively for coding (high coding capability, but lacking reasoning
+    # and document understanding) receives a specialization penalty so residency alone cannot
+    # hijack general queries. Conversely, general reasoning models receive positive role affinity.
+    is_non_coding_task = not spec.is_coding_task and Capability.CODING not in spec.required_caps
+    if is_non_coding_task:
+        has_coding = candidate.capabilities.get(Capability.CODING, 0.0) >= 0.7
+        has_reasoning = candidate.capabilities.get(Capability.REASONING, 0.0) >= 0.5
+        has_doc = candidate.capabilities.get(Capability.DOC_UNDERSTANDING, 0.0) >= 0.5
+
+        if has_coding and not has_reasoning and not has_doc:
+            raw_cap = clamp(raw_cap * 0.70)
+        elif has_reasoning or has_doc:
+            raw_cap = clamp(raw_cap * 1.10)
+
     terms = [
         ScoreTerm(
             name="capability",
-            value=capability_fit(candidate, spec.required_caps),
+            value=raw_cap,
             weight=weights.capability,
         ),
         ScoreTerm(
             name="preferred",
-            value=capability_fit(candidate, spec.preferred_caps),
+            value=raw_pref,
             weight=weights.preferred,
         ),
         ScoreTerm(name="context", value=context_fit(candidate, needed), weight=weights.context),

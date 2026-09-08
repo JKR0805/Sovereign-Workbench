@@ -356,7 +356,37 @@ class AgentRunExecutor:
         started = time.perf_counter()
         chunks_out: list[str] = partial_reply if partial_reply is not None else []
 
-        # Node 0: intake -- resolve attachments before anything else, because
+        # Resolve effective documents: current-turn attachments + documents
+        # previously attached to this conversation.
+        effective_attachments: list[RunAttachment] = list(attachments)
+        inherited_count = 0
+
+        if turn is not None and self._conversations is not None:
+            conv_docs = await self._conversations.documents_for(turn.conversation_id)
+            curr_doc_ids = {a.document_id for a in effective_attachments if a.document_id}
+            curr_filenames = {a.filename for a in effective_attachments if a.filename}
+
+            for doc in conv_docs:
+                doc_id = doc.get("document_id")
+                filename = doc.get("filename") or "document"
+                # Skip if already attached in current turn
+                if doc_id and doc_id in curr_doc_ids:
+                    continue
+                if not doc_id and filename in curr_filenames:
+                    continue
+
+                effective_attachments.append(
+                    RunAttachment(
+                        filename=filename,
+                        mime=doc.get("mime") or "application/octet-stream",
+                        size_bytes=doc.get("size_bytes") or 0,
+                        document_id=doc_id,
+                        kind=doc.get("kind") or "document",
+                    )
+                )
+                inherited_count += 1
+
+        # Node 0: intake -- resolve effective attachments before anything else, because
         # has_scanned_pages / page_count / extracted_chars drive the
         # deterministic VISION / LONG_CONTEXT overrides in classification.
         (
@@ -365,7 +395,12 @@ class AgentRunExecutor:
             document_ids,
             file_summaries,
             fallback_triggered,
-        ) = await self._intake_step(run_id, attachments, ordinal=0)
+        ) = await self._intake_step(
+            run_id,
+            effective_attachments,
+            ordinal=0,
+            inherited_count=inherited_count,
+        )
 
         # Node 1: vision preprocessing -- attached images or scanned fallback pages
         # are described by a vision-capable model *before* the task is classified and routed,
@@ -544,7 +579,12 @@ class AgentRunExecutor:
     # --- node 0: intake --------------------------------------------------
 
     async def _intake_step(
-        self, run_id: str, attachments: Sequence[RunAttachment], *, ordinal: int
+        self,
+        run_id: str,
+        attachments: Sequence[RunAttachment],
+        *,
+        ordinal: int,
+        inherited_count: int = 0,
     ) -> tuple[list[RouterAttachment], list[str], list[str], list[str], bool]:
         node_started = time.perf_counter()
         node_id, kind = "intake", "document_intake"
@@ -556,6 +596,18 @@ class AgentRunExecutor:
             ordinal=ordinal,
             execution_mode=self.mode.value,
         )
+        if inherited_count > 0:
+            inherited_slice = attachments[len(attachments) - inherited_count :]
+            await self._events.emit_event(
+                EventType.CONVERSATION_CONTEXT_INHERITED,
+                run_id=run_id,
+                inherited_count=inherited_count,
+                documents=[
+                    {"filename": a.filename, "document_id": a.document_id}
+                    for a in inherited_slice
+                ],
+                detail=f"Inherited {inherited_count} file(s) from conversation context.",
+            )
         step = RunStepRecord(
             run_id=run_id,
             ordinal=ordinal,
@@ -563,7 +615,7 @@ class AgentRunExecutor:
             kind=kind,
             status=StepStatus.RUNNING,
             started_at=datetime.now(UTC),
-            input={"attachments": len(attachments)},
+            input={"attachments": len(attachments), "inherited_count": inherited_count},
         )
         async with self._database.session() as session:
             await RunRepository(session).add_step(step)
@@ -659,6 +711,7 @@ class AgentRunExecutor:
         step.duration_ms = duration_ms
         step.output = {
             "attachments": len(attachments),
+            "inherited_count": inherited_count,
             "indexed": indexed,
             "deduped": deduped,
             "images": len(image_b64s),
@@ -676,6 +729,10 @@ class AgentRunExecutor:
             duration_ms=duration_ms,
             ordinal=ordinal,
             execution_mode=self.mode.value,
+            payload={
+                "attachments": len(attachments),
+                "inherited_count": inherited_count,
+            },
         )
         return router_attachments, image_b64s, document_ids, file_summaries, fallback_triggered
 

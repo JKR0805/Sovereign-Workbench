@@ -32,7 +32,7 @@ models:
     quantization: Q4_K_M
     modalities_in:
       - text
-    priority: 60
+    priority: 85
     enabled: true
     license: apache-2.0
 
@@ -54,7 +54,7 @@ models:
     quantization: Q4_K_M
     modalities_in:
       - text
-    priority: 80
+    priority: 75
     enabled: true
     license: apache-2.0
 

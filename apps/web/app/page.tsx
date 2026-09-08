@@ -489,7 +489,17 @@ export default function WorkbenchPage() {
 
   const sendPrompt = async (text: string, attachedForThisTurn: AttachedFileItem | null) => {
     const attachments: RunAttachment[] = attachedForThisTurn
-      ? attachedForThisTurn.dataBase64
+      ? attachedForThisTurn.documentId
+        ? [
+            {
+              filename: attachedForThisTurn.name,
+              mime: attachedForThisTurn.mime,
+              size_bytes: attachedForThisTurn.sizeBytes,
+              document_id: attachedForThisTurn.documentId,
+              kind: isImageFile(attachedForThisTurn) ? 'image' : 'document',
+            },
+          ]
+        : attachedForThisTurn.dataBase64
         ? [
             {
               filename: attachedForThisTurn.name,
@@ -497,17 +507,7 @@ export default function WorkbenchPage() {
               size_bytes: attachedForThisTurn.sizeBytes,
               data_base64: attachedForThisTurn.dataBase64,
               document_id: attachedForThisTurn.documentId,
-              kind: 'image',
-            },
-          ]
-        : attachedForThisTurn.documentId
-        ? [
-            {
-              filename: attachedForThisTurn.name,
-              mime: attachedForThisTurn.mime,
-              size_bytes: attachedForThisTurn.sizeBytes,
-              document_id: attachedForThisTurn.documentId,
-              kind: 'document',
+              kind: isImageFile(attachedForThisTurn) ? 'image' : 'document',
             },
           ]
         : []

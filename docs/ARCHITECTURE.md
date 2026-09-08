@@ -1,7 +1,8 @@
 # VAJRA: System Architecture & Technical Blueprint
 
 **Smart India Hackathon 2026**: Problem Statement 26117 (Theme: Smart Automation - Software)  
-**Project**: VAJRA (Sovereign On-Premise Agentic AI Workbench)
+**Project**: VAJRA (Sovereign On-Premise Agentic AI Workbench)  
+**Status**: Production Architecture · **Last Updated**: 2026-09-08
 
 ---
 
@@ -16,7 +17,7 @@ Key mandatory requirements:
 3. **Capability-Based Dynamic Routing**: An automated routing engine that analyzes task intent, complexity, context size, and hardware limits to route execution to the optimal local model without hardcoded model names.
 4. **Declarative Model Pluggability**: Operators must be able to register new open-weight models via declarative configuration profiles or API endpoints without editing router or orchestrator source code.
 5. **Grounded Agent Execution**: An autonomous agent state machine with deterministic budgets, tool calling, AST-guarded sandboxed execution, and structured RAG retrieval with traceable source citations.
-6. **Institutional Artifact Generation**: Autonomous generation of standard deliverable documents (DOCX, XLSX, PPTX, PDF) verified against local knowledge.
+6. **Multi-User Security & Conversation Isolation**: Cryptographically secure local authentication, role-based access control, and complete conversation history isolation between non-admin users alongside full administrative audit oversight.
 7. **Complete Auditability**: Append-only event store with monotonic sequence IDs and SSE streaming for audit compliance.
 
 ### 1.2 Traceability Matrix
@@ -26,11 +27,13 @@ Key mandatory requirements:
 | Zero data egress | 4-layer egress guard + startup self-audit + nftables drop logging | `vajra.sovereignty`, `vajra.sentinel` |
 | No vendor/model lock-in | Pluggable runtime adapter abstraction + declarative model registry | `vajra.runtimes`, `vajra.registry` |
 | Multi-model router | Deterministic capability scoring engine (pure function, model-agnostic) | `vajra.router` |
+| 8-Stage Routing Pipeline | Intake -> Vision Fallback -> Understand -> Retrieve -> Classify -> Execute -> Verify | `vajra.orchestrator`, `vajra.router.understand` |
 | Dynamic model pluggability | Declarative YAML profiles (`config/models/`) + SQLite synchronization | `vajra.registry.profiles` |
-| Local document grounding | PyMuPDF parser + CPU FastEmbed ONNX + local Qdrant vector store | `vajra.rag` |
+| Multi-format local RAG | Tabular pandas parser, DOCX semantic parser, PyMuPDF tables, FastEmbed CPU, Qdrant | `vajra.rag` |
+| Multimodal Quality Fallback | Text coverage probe (< 15%), high-DPI rendering, vision model analysis | `vajra.rag.parse`, `vajra.orchestrator` |
 | Traceable citations | Numbered citation assembly (`[C1]`) with page and bbox provenance | `vajra.rag.citations` |
+| Multi-user & RBAC | Argon2id passwords, 32-byte crypto sessions, UserRole guards, chat isolation | `vajra.auth`, `vajra.orchestrator.conversations` |
 | Autonomous agent worker | Typed state machine + tool registry + AST-guarded Docker sandbox | `vajra.agent`, `vajra.sandbox`, `vajra.tools` |
-| Institutional deliverables | Document generators producing DOCX, XLSX, PPTX, PDF | `vajra.artifacts` |
 | Complete auditability | Append-only event store with monotonic sequence IDs and SSE streaming | `vajra.events` |
 
 ---
@@ -43,7 +46,7 @@ Key mandatory requirements:
 │                                                                  │
 │  ┌────────────────────────────────────────────────────────────┐  │
 │  │ vajra_frontend (172.28.0.0/24) : egress DENY               │  │
-│  │   web      :3000   Next.js static + standalone server      │  │
+│  │   web      :3000   Next.js 15 App Router                   │  │
 │  └──────────────────────────┬─────────────────────────────────┘  │
 │                             │ HTTP + SSE                         │
 │  ┌──────────────────────────┴─────────────────────────────────┐  │
@@ -66,7 +69,7 @@ Key mandatory requirements:
 ### Dependency Flow & Layer Boundaries
 The backend enforces a strict one-way dependency graph verified by unit tests:
 ```text
-api -> orchestrator -> {services} -> adapters -> store/events -> core
+api -> orchestrator -> {router, rag, auth, services} -> adapters -> store/events -> core
 ```
 No layer may import from a layer above it. Circular dependencies are forbidden.
 
@@ -105,26 +108,176 @@ Outbound Request Attempt
    - Code execution containers run with `network_disabled=True` (`--network=none`).
    - Docker Compose services run on private internal bridges (`internal: true`) with no default gateway off-host.
 4. **Layer 4: Host Kernel Netfilter (`nftables`)**:
-   - Host kernel rule drops and logs all outbound packets to non-private destinations:
-     ```text
-     table inet vajra {
-       chain output {
-         type filter hook output priority 0; policy accept;
-         ip daddr { 127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16 } accept
-         meta skuid vajra log prefix "VAJRA-EGRESS-BLOCK " level warn counter drop
-       }
-     }
-     ```
-   - Kernel drop counters are read directly and displayed in the Network UI.
+   - Drops and logs all outbound packets to non-private destinations.
 
 ---
 
-## 4. Hardware Profiles & VRAM Management
+## 4. Intelligent Model Routing & Processing Pipeline (8 Stages)
 
-### 4.1 Target Profile: 8 GB Laptop GPU
-Workstations in field operations often feature constrained GPUs (e.g. NVIDIA RTX 3070/4060 Laptop with 8 GB physical VRAM).
+The workbench implements an 8-stage intelligent routing pipeline designed to handle heterogeneous file formats, multimodal fallback, immutable intent authority, and deterministic capability matching.
 
-#### Usable Memory Budget
+```text
+                         USER REQUEST
+                              │
+                              ▼
+                     ┌─────────────────┐
+                     │   Intake Layer  │ (Node 0)
+                     │ Prompt + Files  │
+                     └────────┬────────┘
+                              │
+                 ┌────────────┴────────────┐
+                 ▼                         ▼
+         [ Has Attachments ]        [ No Attachment ]
+                 │                         │
+                 ▼                         │
+         ┌───────────────┐                 │
+         │ File Parsing  │                 │
+         │ (PDF/CSV/DOCX)│                 │
+         └───────┬───────┘                 │
+                 │                         │
+           Quality Probe                   │
+        (text coverage < 15%?              │
+         scanned pages?)                   │
+                 │                         │
+        ┌────────┴────────┐                │
+   [Failed]            [Passed]            │
+        │                 │                │
+        ▼                 │                │
+┌───────────────┐         │                │
+│ Multimodal    │ (Node 1)│                │
+│ Vision Model  │         │                │
+└───────┬───────┘         │                │
+        │                 │                │
+        └────────┬────────┘                │
+                 ▼                         │
+       extracted_file_context              │
+                 │                         │
+                 └────────────┬────────────┘
+                              │
+                              ▼
+                 ┌─────────────────────────┐
+                 │    Semantic Query       │
+                 │  Understanding Engine   │
+                 │     (General Model)     │
+                 └────────────┬────────────┘
+                              │
+            ┌─────────────────┴─────────────────┐
+            │                                   │
+            ▼                                   ▼
+    original_prompt                     enhanced_prompt
+ (IMMUTABLE INTENT AUTHORITY)        (Keyword-rich for RAG)
+            │                                   │
+            │                  ┌────────────────┘
+            │                  ▼
+            │        ┌───────────────────┐
+            │        │   RAG Retrieval   │ (Node 2)
+            │        │  (Scoped/Corpus)  │
+            │        └─────────┬─────────┘
+            │                  │
+            │                  ▼
+            │          retrieved_context
+            │                  │
+            └──────────┬───────┘
+                       │
+                       ▼
+            ┌─────────────────────┐
+            │   Task Classifier   │ (Node 3)
+            │     & Router        │
+            └──────────┬──────────┘
+                       │
+       ┌───────────────┴───────────────┐
+       ▼                               ▼
+[ Coding Task ]                [ General Task ]
+Capability.CODING               Capability.TEXT/REASONING
+       │                               │
+       ▼                               ▼
+Coding Specialist Model         General Intelligence Model
+(e.g., qwen2.5-coder:7b)        (e.g., qwen3:8b / llama3)
+       │                               │
+       └───────────────┬───────────────┘
+                       │
+                       ▼
+            ┌─────────────────────┐
+            │  Target Generation  │ (Node 4)
+            │   Execution Node    │
+            └──────────┬──────────┘
+                       │
+                       ▼
+            ┌─────────────────────┐
+            │  Sovereignty Guard  │ (Node 5)
+            │  Verification Node  │
+            └─────────────────────┘
+```
+
+### Stage Details
+
+1. **Node 0: Attachment Intake & Multi-Format Parsing (`vajra.rag.intake`, `vajra.rag.parse`)**:
+   - Files enter through a single point of intake.
+   - **Tabular Data (`.csv`, `.tsv`, `.xlsx`, `.xls`)**: Parsed via `pandas`. Extracts column names and data types, row/column counts, and numerical descriptive statistics (`df.describe()`). Data is formatted into bounded markdown tables.
+   - **Word Documents (`.docx`)**: Parsed via `python-docx` into semantic headings, lists, tables, and paragraphs.
+   - **PDFs (`.pdf`)**: Parsed via PyMuPDF with `find_tables()` extracting structured grid rows into markdown tables.
+2. **Node 1: Multimodal Vision Preprocessing / Fallback (`vajra.orchestrator.service`)**:
+   - PageClassifier calculates text-layer area coverage.
+   - If coverage < 15% or pages are `SCANNED`, PyMuPDF renders base64 PNG pages (`pixmap(dpi=150)`).
+   - Dedicated vision model (`llava:7b`) describes visual elements, diagrams, or scanned handwriting.
+   - Normalizes visual output into `extracted_file_context`, freeing the answering model from needing vision capability.
+3. **Stage 2: Semantic Query Understanding (`vajra.router.understand`)**:
+   - Queries the general model to derive `enhanced_prompt` (optimized with domain entities and terminology for vector search).
+   - Identifies if the task requires programming, script writing, or technical automation (`is_coding_task: bool`).
+   - Invariant: `original_prompt` remains strictly immutable as the authoritative user intent.
+4. **Node 2: Scoped Vector Retrieval (`vajra.rag.retrieve`)**:
+   - Queries local Qdrant index using `enhanced_prompt`.
+   - Scopes search to the run's attached documents when present (`document_ids`), or searches the wider corpus.
+5. **Node 3: Task Classification & Model Routing (`vajra.router`)**:
+   - Analyzes `original_prompt`, `enhanced_prompt`, attachments, and `is_coding_task`.
+   - Tasks with `is_coding_task=True` are mapped directly to `Capability.CODING`.
+   - The capability router executes hard filters (VRAM, context, modalities) and computes 7-factor weighted scores.
+   - Models are selected dynamically from `ModelRegistry` with zero hardcoded model names.
+6. **Node 4: Target Model Execution (`vajra.orchestrator.service`)**:
+   - For coding tasks, formats execution with `STRUCTURED_CODING_SYSTEM_PROMPT` containing tabular schemas, descriptive stats, and execution constraints.
+   - Streams tokens via SSE to the user interface.
+7. **Node 5: Sovereignty Verification**:
+   - Reads the network ledger for the run duration.
+   - Produces a verifiable verdict (`pass`, `fail`, `unverified`).
+
+---
+
+## 5. Multi-User Authentication & Conversation Isolation
+
+```text
+HTTP Request
+  │
+  ▼
+[Session Middleware] ── Cookie: `vajra_session` or Header: `Authorization: Bearer <token>`
+  │
+  ├─► [Invalid / Expired] ──► 401 Unauthorized
+  │
+  └─► [Valid Token]
+        │
+        ▼
+   [Resolve UserRecord] (id, username, role)
+        │
+        ├─► [User Role Guard] ── Role matches endpoint policy? (ADMIN, USER, AUDITOR)
+        │
+        └─► [Resource Ownership Guard]
+              │
+              ├─► User is ADMIN? ──► Full visibility across all users' data
+              │
+              └─► User is standard USER? ──► Scoped strictly to resource.user_id == current_user.id
+```
+
+### Architectural Properties
+- **Passwords**: Hashed with Argon2id (memory cost 64MB, iterations 3) with HMAC-SHA256 fallback.
+- **Sessions**: Cryptographically random 32-byte tokens (`secrets.token_urlsafe(32)`). The raw token is stored on the client; only its SHA-256 hash is persisted in SQLite.
+- **Timeouts**: Enforces 1-hour idle timeout and 24-hour absolute maximum lifespan.
+- **Conversation State Isolation**: Conversations and turns carry `user_id`. When standard users query `/api/conversations`, they only receive their own records. Admins can view all conversations with user attribution tags.
+- **New Chat Independence**: Frontend and backend cleanly decouple conversation lifecycle so starting a new chat creates a fresh thread without state leakage from previous chats.
+
+---
+
+## 6. Hardware Fleet Profiles & VRAM Management
+
+### Target Profile: 8 GB Laptop GPU
 ```text
   8.0 GB physical VRAM
 - 1.0 GB desktop compositor & browser display
@@ -133,161 +286,24 @@ Workstations in field operations often feature constrained GPUs (e.g. NVIDIA RTX
   6.7 GB usable for a single model and its KV cache
 ```
 
-#### Key Engineering Decisions for 8 GB Constraints
-1. **CPU Offloading for Embeddings & Reranking**:
-   - Vector embeddings run on CPU via FastEmbed ONNX (`BAAI/bge-small-en-v1.5`, 384 dimensions).
-   - Frees ~1.5 GB of VRAM permanently for generative models with negligible CPU latency (~38ms).
-2. **Single-Resident VRAM Policy**:
-   - Configured with `max_loaded_models: 1` and `keep_alive: 30m`.
-   - Exactly one generative model resides in GPU memory at a time.
-   - The residency manager coordinates loading and evicting models dynamically.
-3. **Bounded Context Windows**:
-   - Long contexts consume substantial KV cache memory.
-   - Context is capped at `num_ctx: 8192` tokens per model, allowing RAG retrieval to supply necessary context rather than stuffing context windows.
+- **CPU Offloaded Embeddings**: FastEmbed runs ONNX `bge-small-en-v1.5` on CPU, preserving 100% of GPU VRAM for LLMs.
+- **Single-Resident Policy**: Exactly one generative model resides in GPU memory at a time with a 30-minute keep-alive.
+- **Bounded Context**: Context windows default to `num_ctx: 8192` tokens to balance KV cache memory against reasoning capacity.
 
-### 4.2 Supported Fleet Profiles
-
-| Profile Name | Target VRAM | Primary Reasoning | Coding Model | Vision Specialist | Embeddings |
+| Profile | Physical VRAM | Primary General Model | Coding Specialist | Vision Model | Embedding Engine |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| `laptop-8gb.yaml` | 8 GB physical (~6.7 GB net) | `qwen3:8b` (Q4_K_M, ~5.0 GB) | `qwen2.5-coder:7b` (~4.7 GB) | `qwen2.5-vl:3b` (~3.2 GB) | FastEmbed CPU (0 GB VRAM) |
-| `mid-16gb.yaml` | 16 GB physical (~14.5 GB net)| `qwen3:8b` | `qwen2.5-coder:7b` | `qwen2.5-vl:7b` | FastEmbed CPU or local GPU |
-| `high-perf-24gb.yaml`| 24-48 GB workstation | `qwen3.6:27b` | `qwen3-coder:30b` | `qwen3-vl:32b` | BGE-M3 / Qwen3-Embedding |
+| `laptop-8gb.yaml` | 8 GB (~6.7 GB net) | `qwen3:8b` (Q4_K_M) | `qwen2.5-coder:7b` | `llava:7b` | FastEmbed CPU |
+| `mid-16gb.yaml` | 16 GB (~14.5 GB net)| `qwen3:8b` | `qwen2.5-coder:7b` | `llava:7b` | FastEmbed CPU / Local GPU |
+| `high-perf-24gb.yaml`| 24-48 GB | `qwen3.6:27b` | `qwen3-coder:30b` | `llava:13b` | FastEmbed CPU / BGE-M3 |
 
 ---
 
-## 5. Model-Agnostic Routing Engine
+## 7. Event Sourcing & Audit Ledger
 
-The routing engine contains **zero** hardcoded model names. It evaluates models as declarative resources through a 5-stage deterministic pipeline.
-
-```text
-Incoming Task Spec
-  │
-  ▼
-[Stage 1: Intent & Feature Classification] (Keywords + Heuristics)
-  │
-  ▼
-[Stage 2: Hard Filtering] (Capabilities, Modalities, Context Fit, VRAM bounds)
-  │
-  ▼
-[Stage 3: 7-Factor Weighted Scoring] (Pure mathematical formula)
-  │
-  ▼
-[Stage 4: Policy Overlay] (Declarative user/project rules)
-  │
-  ▼
-[Stage 5: Fallback Chain Assembly] ──► RoutingDecision
-```
-
-### 5.1 Stage 1: Task Classification
-Extracts required capabilities, preferred capabilities, input modalities (`text`, `image`), and estimated token budgets based on prompt features and attachments.
-
-### 5.2 Stage 2: Hard Filters
-Eliminates candidates that cannot execute the task:
-- Model is `disabled` or `unhealthy`.
-- Missing any *required* capability (e.g. lacks `vision` for image tasks).
-- Missing any required input modality.
-- Context window insufficient (`context_window < estimated_input_tokens * 1.3`).
-- VRAM exceeds available memory plus evictable memory.
-
-### 5.3 Stage 3: 7-Factor Weighted Scoring Formula
-Remaining candidates are scored on a scale from 0 to 100:
-
-$$\text{Score} = 100 \times \frac{\sum_{i=1}^{7} (w_i \times f_i)}{\sum_{i=1}^{7} w_i}$$
-
-Where the 7 scoring factors and default weights are:
-
-| Factor | Description | Default Weight ($w$) |
-| :--- | :--- | :--- |
-| $f_{\text{capability}}$ | Mean strength across required capabilities | $0.40$ |
-| $f_{\text{preferred}}$ | Mean strength across preferred capabilities | $0.15$ |
-| $f_{\text{context}}$ | Fit ratio: $\text{clamp}\left(\frac{\log(\text{ctx}/\text{needed})}{\log(8)}, 0, 1\right)$ | $0.10$ |
-| $f_{\text{latency}}$ | Latency score: $1 - \text{clamp}\left(\frac{\text{ema\_latency}}{\text{budget}}, 0, 1\right)$ | $0.10$ |
-| $f_{\text{priority}}$ | Operator-configured priority offset ($0.0 - 1.0$) | $0.10$ |
-| $f_{\text{residency}}$ | Residency affinity: $1.0$ if already resident in VRAM, else $0.35$ | $0.10$ |
-| $f_{\text{reliability}}$ | Historical reliability: $1 - \text{error\_rate}$ | $0.05$ |
-
-### 5.4 Stage 4: Policy Overlay
-Applies declarative institutional rules defined in Routing Studio (e.g. "Confidential Class A tasks must run on loopback Ollama instances").
-
-### 5.5 Stage 5: Fallback Chain
-Constructs an ordered list of fallback models. If the primary model fails, times out, or produces malformed structured output, the orchestrator transitions to the next candidate and records the branch event.
-
----
-
-## 6. Local Document RAG Subsystem
+All system operations, node steps, and tokens are written to an append-only event log in SQLite:
 
 ```text
-Uploaded File (.pdf, .md, .txt, .csv)
-  │
-  ▼
-[Document Parser (PyMuPDF)] ──► Extracts text blocks, headings, page bboxes
-  │
-  ▼
-[Page Classifier] ──► Digital text page vs Scanned image page
-  │
-  ▼
-[Structure-Aware Chunker] ──► Heading hierarchy, section paths, token estimation
-  │
-  ▼
-[CPU Embedder (FastEmbed ONNX)] ──► BAAI/bge-small-en-v1.5 (384 dimensions)
-  │
-  ▼
-[Vector Store (Qdrant)] ──► Embedded on-disk (data/qdrant) or local daemon (:6333)
-  │
-  ▼
-[Hybrid Retrieval & Citation Assembly] ──► Grounded chunks with [C1], [C2] markers
-```
-
-### 6.1 Parsing & Provenance
-- `PyMuPDFParser` extracts text blocks while capturing exact page numbers and bounding box coordinates.
-- `PageClassifier` evaluates text coverage. Pages with less than 15% text coverage are classified as `SCANNED`, flagging them for future vision-language extraction.
-
-### 6.2 Structure-Aware Chunking
-- Splits along heading hierarchies rather than arbitrary character windows.
-- Packs chunks to ~700 tokens with 15% overlap, preserving section paths (e.g. `Heat Exchanger E-102 > Maintenance Thresholds`).
-- Prepends `"{doc_title} > {section_path}"` to the chunk text before embedding to improve retrieval accuracy on terse SOP documents.
-
-### 6.3 Local Vector Storage & Retrieval
-- Operates in embedded mode (`data/qdrant`) with zero Docker dependency, or connects to a local daemon (`http://127.0.0.1:6333`).
-- Evaluates queries with cosine similarity.
-- Citation assembler formats source markers (`[C1]`, `[C2]`) mapped directly to document pages and bounding boxes.
-
----
-
-## 7. Code Execution Sandbox & AST Guard
-
-```text
-Generated Python Code
-  │
-  ▼
-[AST Static Guard (vajra.sandbox.guard)]
-  │ ── Disallowed imports? (socket, requests, urllib, httpx, subprocess, os.system, eval, exec)
-  │
-  ├─► [Violations Found] ──► Reject with GuardFinding list before execution
-  │
-  └─► [Accepted]
-        │
-        ▼
-[Docker Sandbox Container (vajra.sandbox.docker)]
-  │ ── network_disabled = True (--network=none)
-  │ ── read_only root filesystem
-  │ ── nano_cpus = 2 cores, mem_limit = 1GB
-  │ ── tmpfs = /tmp (size=64m, noexec)
-  │ ── user = 65534:65534 (nobody)
-  │ ── wall-clock timeout = 30 seconds
-  │
-  ▼
-Exit code, stdout, stderr, and generated artifact files captured
-```
-
----
-
-## 8. Event Sourcing & Audit Architecture
-
-Every mutation, node transition, token generation, and network event is written sequentially to an append-only SQLite event ledger:
-
-```text
-Event Producers (Orchestrator, Router, RAG, Tools, Egress Guard)
+Event Producers (Orchestrator, Router, RAG, Egress Guard)
   │
   ▼
 [EventBus (vajra.events.bus)] ──► Assigns monotonic sequence ID (seq)
@@ -302,19 +318,7 @@ Event Producers (Orchestrator, Router, RAG, Tools, Egress Guard)
   └─► Tamper-Evident Audit Export Log
 ```
 
-### Guarantees
-1. **Single Source of Truth**: The UI reconstructs its state entirely by replaying events from sequence 0 forward.
-2. **Deterministic Replay**: A completed run replayed from the event log renders identically to a live run.
-3. **Resilient Reconnection**: Clients reconnect using `?since=<seq>` to backfill missed events without data loss.
-
----
-
-## 9. Deliverable Artifact Production
-
-The artifact manager (`vajra.artifacts`) generates production documents locally:
-- **DOCX**: Structured Word documents via `python-docx` with institutional headings, findings tables, SOP citations, and approval signatures.
-- **XLSX**: Engineering calculation workbooks via `openpyxl`.
-- **PPTX**: Presentation briefings via `python-pptx`.
-- **PDF**: Fixed-layout inspection notes via `reportlab`.
-
-All artifacts are persisted under `data/artifacts/{run_id}/` with SHA-256 checksums recorded in the database and emitted over the event stream.
+Guarantees:
+1. **Single Source of Truth**: UI state is reconstructed completely by replaying events from sequence 0 forward.
+2. **Deterministic Replay**: Replaying an audit log reconstructs the exact timeline of inference.
+3. **Resilient Reconnection**: Clients reconnect using `?since=<seq>` to backfill missed events during network hiccups.

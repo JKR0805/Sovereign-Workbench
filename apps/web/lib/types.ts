@@ -477,7 +477,8 @@ export type WireEventType =
   | "EGRESS_BLOCKED"
   | "PROMPT_ENHANCED"
   | "EXTRACTION_COMPLETED"
-  | "MULTIMODAL_FALLBACK";
+  | "MULTIMODAL_FALLBACK"
+  | "CONVERSATION_CONTEXT_INHERITED";
 
 export interface WireEvent {
   id: string;
