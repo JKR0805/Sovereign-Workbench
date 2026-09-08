@@ -53,6 +53,8 @@ class VectorIndex(Protocol):
 
     async def delete_by_document(self, document_id: str) -> None: ...
 
+    async def set_canonical(self, document_id: str, is_canonical: bool) -> None: ...
+
 
 def assert_cloud_inference_disabled(settings: QdrantSettings) -> None:
     """Fail closed if Qdrant cloud inference was ever turned on.
@@ -198,6 +200,7 @@ class QdrantIndex:
                 "page_to": chunk.page_to,
                 "doc_title": chunk.doc_title,
                 "token_count": chunk.token_count,
+                "is_canonical": getattr(chunk, "is_canonical", True),
             }
             points.append(
                 PointStruct(
@@ -232,6 +235,11 @@ class QdrantIndex:
                 query_filter = Filter(
                     must=[FieldCondition(key="document_id", match=match_any)]
                 )
+        else:
+            # Corpus-wide search: isolate strictly to canonical Knowledge Base documents
+            query_filter = Filter(
+                must=[FieldCondition(key="is_canonical", match=MatchValue(value=True))]
+            )
 
         search_result = client.query_points(
             collection_name=self._settings.collection,
@@ -256,6 +264,22 @@ class QdrantIndex:
                 )
             )
         return retrieved
+
+    async def set_canonical(self, document_id: str, is_canonical: bool) -> None:
+        client = self._client()
+        from qdrant_client.models import FieldCondition, Filter, MatchValue
+
+        collections = client.get_collections().collections
+        if not any(c.name == self._settings.collection for c in collections):
+            return
+
+        client.set_payload(
+            collection_name=self._settings.collection,
+            payload={"is_canonical": is_canonical},
+            points=Filter(
+                must=[FieldCondition(key="document_id", match=MatchValue(value=document_id))]
+            ),
+        )
 
     async def delete_by_document(self, document_id: str) -> None:
         client = self._client()

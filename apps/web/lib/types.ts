@@ -477,7 +477,8 @@ export type WireEventType =
   | "EGRESS_BLOCKED"
   | "PROMPT_ENHANCED"
   | "EXTRACTION_COMPLETED"
-  | "MULTIMODAL_FALLBACK";
+  | "MULTIMODAL_FALLBACK"
+  | "CONVERSATION_CONTEXT_INHERITED";
 
 export interface WireEvent {
   id: string;
@@ -512,6 +513,7 @@ export interface DocumentRead {
   page_count: number | null;
   scanned_page_count: number | null;
   status: DocumentStatus;
+  is_canonical?: boolean;
   parser: string | null;
   ingested_at: string | null;
   error: string | null;

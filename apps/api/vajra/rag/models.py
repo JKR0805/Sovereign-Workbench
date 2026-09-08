@@ -103,6 +103,7 @@ class Chunk(BaseModel):
     bbox: list[BBox] = Field(default_factory=list)
     token_count: int = 0
     doc_title: str | None = None
+    is_canonical: bool = True
 
     @property
     def embed_text(self) -> str:
@@ -186,6 +187,7 @@ class IngestRequest(BaseModel):
     project_id: str | None = None
     document_id: str | None = None
     run_id: str | None = None
+    is_canonical: bool = True
     """When ingestion happens as part of a run's intake step, its progress
     events (``PAGE_CLASSIFIED``, ``DOCUMENT_INGESTED``) are tagged with this so
     they land on the run's own SSE stream instead of the global one -- the run

@@ -11,6 +11,7 @@ import {
   ChevronDown,
   ChevronUp,
   AlertTriangle,
+  Layers,
 } from 'lucide-react';
 import { api } from '../../lib/api';
 import { MessageCitation, RunAttachment, WireEvent } from '../../lib/types';
@@ -113,6 +114,7 @@ export const InferenceGraph: React.FC<InferenceGraphProps> = ({
     requiresMultimodal: boolean;
   }[]>([]);
   const [multimodalFallback, setMultimodalFallback] = useState<boolean>(false);
+  const [inheritedFiles, setInheritedFiles] = useState<{ filename: string; documentId?: string }[]>([]);
   const [verdict, setVerdict] = useState<string | null>(null);
   const [laggedWarning, setLaggedWarning] = useState(false);
 
@@ -223,6 +225,17 @@ export const InferenceGraph: React.FC<InferenceGraphProps> = ({
                 },
               ]);
               break;
+
+            case 'CONVERSATION_CONTEXT_INHERITED': {
+              const rawDocs = Array.isArray(event.payload?.documents) ? event.payload.documents : [];
+              setInheritedFiles(
+                rawDocs.map((d: any) => ({
+                  filename: String(d.filename || 'conversation document'),
+                  documentId: d.document_id ? String(d.document_id) : undefined,
+                }))
+              );
+              break;
+            }
 
             case 'MULTIMODAL_FALLBACK':
               setMultimodalFallback(true);
@@ -476,7 +489,11 @@ export const InferenceGraph: React.FC<InferenceGraphProps> = ({
                       <div className="text-xs text-text-secondary font-mono mt-0.5">
                         {nodeId === 'intake' &&
                           (extractedFiles.length > 0
-                            ? `${extractedFiles.length} file(s) ingested & parsed`
+                            ? `${extractedFiles.length} file(s) ingested & parsed${
+                                inheritedFiles.length > 0 ? ` (${inheritedFiles.length} active from conversation)` : ''
+                              }`
+                            : inheritedFiles.length > 0
+                            ? `${inheritedFiles.length} attachment(s) (active conversation context)`
                             : attachments && attachments.length > 0
                             ? `${attachments.length} attachment(s)`
                             : 'No attachments')}
@@ -523,6 +540,14 @@ export const InferenceGraph: React.FC<InferenceGraphProps> = ({
                   <div className="pl-9 pt-1 border-t border-border/50 mt-1">
                     {nodeId === 'intake' && (
                       <div className="flex flex-col gap-2">
+                        {inheritedFiles.length > 0 && (
+                          <div className="p-2 rounded bg-accent/10 border border-accent/30 text-xs font-mono text-accent flex items-center gap-2">
+                            <Layers className="w-3.5 h-3.5 flex-shrink-0" />
+                            <span>
+                              Active conversation context: {inheritedFiles.map((f) => f.filename).join(', ')} retained from previous turn(s).
+                            </span>
+                          </div>
+                        )}
                         {skippedAttachments.length > 0 && (
                           <div className="flex flex-col gap-1 text-xs font-mono">
                             {skippedAttachments.map((s, i) => (

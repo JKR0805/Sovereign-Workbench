@@ -82,3 +82,80 @@ async def test_knowledge_api_rejects_unsupported_format(
     resp = await authenticated_client.post("/api/knowledge/documents", files=bad_file)
     assert resp.status_code == status.HTTP_400_BAD_REQUEST
     assert "Unsupported document format" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_session_only_attachment_and_explicit_promotion(
+    authenticated_client: httpx.AsyncClient,
+) -> None:
+    """Verify session-only uploads are excluded from corpus search until explicitly promoted."""
+    doc_content = (
+        b"# Reactor Emergency Protocols\n\n"
+        b"The emergency core override code is ALPHA-994821 for sector 7."
+    )
+
+    # 1. Upload as session-only (canonical=false)
+    files = {"file": ("emergency_protocol.md", doc_content, "text/markdown")}
+    upload_resp = await authenticated_client.post(
+        "/api/knowledge/documents?canonical=false", files=files
+    )
+    assert upload_resp.status_code == status.HTTP_201_CREATED
+    data = upload_resp.json()
+    doc_id = data["id"]
+    assert data["is_canonical"] is False
+
+    # 2. Canonical-only listing excludes it
+    canon_list_resp = await authenticated_client.get("/api/knowledge/documents?canonical_only=true")
+    assert canon_list_resp.status_code == status.HTTP_200_OK
+    assert not any(d["id"] == doc_id for d in canon_list_resp.json())
+
+    # 3. All documents listing includes it
+    all_list_resp = await authenticated_client.get("/api/knowledge/documents?canonical_only=false")
+    assert all_list_resp.status_code == status.HTTP_200_OK
+    assert any(d["id"] == doc_id for d in all_list_resp.json())
+
+    # 4. Corpus-wide search (no document_ids) MUST NOT retrieve session-only document
+    corpus_search = await authenticated_client.post(
+        "/api/knowledge/search",
+        json={"query": "What is the emergency core override code?", "top_k": 3},
+    )
+    assert corpus_search.status_code == status.HTTP_200_OK
+    assert not any(c["document_id"] == doc_id for c in corpus_search.json()["chunks"])
+
+    # 5. Scoped search (document_ids=[doc_id]) DOES retrieve session-only document
+    scoped_search = await authenticated_client.post(
+        "/api/knowledge/search",
+        json={
+            "query": "What is the emergency core override code?",
+            "document_ids": [doc_id],
+            "top_k": 3,
+        },
+    )
+    assert scoped_search.status_code == status.HTTP_200_OK
+    scoped_chunks = scoped_search.json()["chunks"]
+    assert len(scoped_chunks) >= 1
+    assert any("ALPHA-994821" in c["text"] for c in scoped_chunks)
+
+    # 6. Explicitly promote the document to canonical Knowledge Base
+    promote_resp = await authenticated_client.post(f"/api/knowledge/documents/{doc_id}/promote")
+    assert promote_resp.status_code == status.HTTP_200_OK
+    assert promote_resp.json()["is_canonical"] is True
+
+    # 7. Canonical-only listing now includes it
+    canon_list_after = await authenticated_client.get("/api/knowledge/documents?canonical_only=true")
+    assert any(d["id"] == doc_id for d in canon_list_after.json())
+
+    # 8. Corpus-wide search NOW retrieves it as part of the canonical KB
+    corpus_search_after = await authenticated_client.post(
+        "/api/knowledge/search",
+        json={"query": "What is the emergency core override code?", "top_k": 3},
+    )
+    assert corpus_search_after.status_code == status.HTTP_200_OK
+    after_chunks = corpus_search_after.json()["chunks"]
+    assert any(c["document_id"] == doc_id for c in after_chunks)
+    assert any("ALPHA-994821" in c["text"] for c in after_chunks)
+
+    # 9. Clean up
+    del_resp = await authenticated_client.delete(f"/api/knowledge/documents/{doc_id}")
+    assert del_resp.status_code == status.HTTP_204_NO_CONTENT
+

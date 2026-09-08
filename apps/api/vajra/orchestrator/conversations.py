@@ -380,3 +380,56 @@ class ConversationService:
             and record.content
         ]
         return turns[-max_turns:]
+
+    async def documents_for(self, conversation_id: str) -> list[dict[str, Any]]:
+        """Collected documents attached or uploaded across turns in this conversation.
+
+        Deduplicated with preference for stable document_id, falling back to filename.
+        Enriches document_id from the knowledge repository when only filename was recorded.
+        """
+        async with self._database.session() as session:
+            repository = ConversationRepository(session)
+            messages = await repository.list_messages(conversation_id)
+            knowledge_repo = KnowledgeRepository(session)
+
+            docs: list[dict[str, Any]] = []
+            seen_ids: set[str] = set()
+            seen_filenames: set[str] = set()
+
+            for message in messages:
+                if not message.attachments:
+                    continue
+                for att in message.attachments:
+                    if not isinstance(att, dict):
+                        continue
+                    doc_dict = dict(att)
+                    doc_id = doc_dict.get("document_id")
+                    filename = doc_dict.get("filename")
+
+                    # Enrich document_id if missing and filename known
+                    if not doc_id and filename:
+                        doc = await knowledge_repo.get_document_by_filename(filename)
+                        if doc is not None:
+                            doc_id = doc.id
+                            doc_dict["document_id"] = doc_id
+                            if not doc_dict.get("size_bytes") and doc.size_bytes:
+                                doc_dict["size_bytes"] = doc.size_bytes
+                            if not doc_dict.get("mime") and doc.mime:
+                                doc_dict["mime"] = doc.mime
+
+                    if doc_id:
+                        if doc_id in seen_ids:
+                            continue
+                        seen_ids.add(doc_id)
+                        if filename:
+                            seen_filenames.add(filename)
+                    elif filename:
+                        if filename in seen_filenames:
+                            continue
+                        seen_filenames.add(filename)
+                    else:
+                        continue
+
+                    docs.append(doc_dict)
+
+            return docs

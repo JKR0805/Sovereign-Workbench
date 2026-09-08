@@ -77,7 +77,7 @@ class StructureAwareChunker:
         self._overlap_tokens = int(target_tokens * overlap_ratio)
         self._min_tokens = min_tokens
 
-    def chunk(self, document: ExtractedDocument) -> list[Chunk]:
+    def chunk(self, document: ExtractedDocument, *, is_canonical: bool = True) -> list[Chunk]:
         """Chunk a parsed document. Returns chunks in reading order."""
         blocks = assign_section_paths(document.blocks)
         chunks: list[Chunk] = []
@@ -85,7 +85,7 @@ class StructureAwareChunker:
 
         for section_blocks in self._group_by_section(blocks):
             for payload in self._pack(section_blocks):
-                chunks.append(self._build(document, payload, ordinal))
+                chunks.append(self._build(document, payload, ordinal, is_canonical=is_canonical))
                 ordinal += 1
         return chunks
 
@@ -164,7 +164,13 @@ class StructureAwareChunker:
     # --- assembly --------------------------------------------------------
 
     @staticmethod
-    def _build(document: ExtractedDocument, blocks: Sequence[Block], ordinal: int) -> Chunk:
+    def _build(
+        document: ExtractedDocument,
+        blocks: Sequence[Block],
+        ordinal: int,
+        *,
+        is_canonical: bool = True,
+    ) -> Chunk:
         section_path = blocks[0].section_path
         heading = section_path.split(" > ")[-1] if section_path else None
 
@@ -187,4 +193,5 @@ class StructureAwareChunker:
             bbox=boxes,
             token_count=estimate_tokens(body),
             doc_title=document.title,
+            is_canonical=is_canonical,
         )

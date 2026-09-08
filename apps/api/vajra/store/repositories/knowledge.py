@@ -62,13 +62,26 @@ class KnowledgeRepository(Repository):
         result = await self.session.execute(statement)
         return int(result.scalar_one())
 
-    async def list_documents(self, *, project_id: str | None = None) -> list[DocumentRecord]:
+    async def list_documents(
+        self, *, project_id: str | None = None, canonical_only: bool | None = None
+    ) -> list[DocumentRecord]:
         statement = select(DocumentRecord)
         if project_id is not None:
             statement = statement.where(DocumentRecord.project_id == project_id)
+        if canonical_only is not None:
+            statement = statement.where(DocumentRecord.is_canonical.is_(canonical_only))
         statement = statement.order_by(DocumentRecord.created_at.desc())
         result = await self.session.execute(statement)
         return list(result.scalars().all())
+
+    async def set_canonical(self, document_id: str, is_canonical: bool) -> DocumentRecord | None:
+        record = await self.get_document(document_id)
+        if record is None:
+            return None
+        record.is_canonical = is_canonical
+        self.session.add(record)
+        await self.session.flush()
+        return record
 
     async def delete_document(self, record: DocumentRecord) -> None:
         await self.session.execute(

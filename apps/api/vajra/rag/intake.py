@@ -41,7 +41,23 @@ IMAGE_EXTENSIONS: frozenset[str] = frozenset(
     {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tiff"}
 )
 PARSEABLE_EXTENSIONS: frozenset[str] = frozenset(
-    {".pdf", ".docx", ".csv", ".xlsx", ".xls", ".tsv", ".txt", ".md", ".json", ".log"}
+    {
+        ".pdf",
+        ".docx",
+        ".csv",
+        ".xlsx",
+        ".xls",
+        ".tsv",
+        ".txt",
+        ".md",
+        ".json",
+        ".log",
+        ".py",
+        ".yaml",
+        ".yml",
+        ".sh",
+        ".sql",
+    }
 )
 
 #: How much of a file to sniff when neither mime nor extension resolves it.
@@ -131,6 +147,7 @@ class AttachmentIntake:
         project_id: str | None = None,
         run_id: str | None = None,
         kind: AttachmentKind = AttachmentKind.AUTO,
+        is_canonical: bool = True,
     ) -> IntakeResult:
         sha256 = hashlib.sha256(content).hexdigest()
         resolved_mime = mime or mimetypes.guess_type(filename)[0] or "application/octet-stream"
@@ -146,6 +163,7 @@ class AttachmentIntake:
                 sha256=sha256,
                 storage_path=storage_path,
                 project_id=project_id,
+                is_canonical=is_canonical,
             )
 
         suffix = Path(filename).suffix.lower()
@@ -174,6 +192,10 @@ class AttachmentIntake:
 
         existing = await self._get_by_sha(sha256)
         if existing is not None and existing.status == DocumentStatus.INDEXED:
+            if is_canonical and not existing.is_canonical:
+                async with self._database.session() as session:
+                    await KnowledgeRepository(session).set_canonical(existing.id, True)
+                await self._index.set_canonical(existing.id, True)
             char_count = await self._char_count(existing.id)
             return IntakeResult(
                 document_id=existing.id,
@@ -199,6 +221,7 @@ class AttachmentIntake:
                 size_bytes=len(content),
                 storage_path=str(storage_path),
                 status=DocumentStatus.PENDING,
+                is_canonical=is_canonical,
                 created_at=datetime.now(UTC),
             )
             async with self._database.session() as session:
@@ -215,6 +238,7 @@ class AttachmentIntake:
                     mime=resolved_mime,
                     project_id=project_id,
                     run_id=run_id,
+                    is_canonical=is_canonical,
                 ),
                 record=record,
             )
@@ -283,6 +307,25 @@ class AttachmentIntake:
                 scanned_page_count=record.scanned_page_count,
                 extracted_chars=char_count,
             )
+        if (
+            record.status == DocumentStatus.SKIPPED
+            or (record.mime and record.mime.startswith("image/"))
+            or Path(record.filename).suffix.lower() in IMAGE_EXTENSIONS
+        ) and record.storage_path:
+            storage_path = Path(record.storage_path)
+            if storage_path.exists():
+                content = storage_path.read_bytes()
+                return IntakeResult(
+                    document_id=record.id,
+                    filename=record.filename,
+                    mime=record.mime,
+                    size_bytes=record.size_bytes,
+                    sha256=record.sha256,
+                    storage_path=str(storage_path),
+                    disposition=IntakeDisposition.IMAGE,
+                    detail="Image attachment; sent to the vision model.",
+                    image_base64=base64.b64encode(content).decode("ascii"),
+                )
         if record.status == DocumentStatus.FAILED or record.storage_path is None:
             return IntakeResult(
                 document_id=record.id,
@@ -336,6 +379,7 @@ class AttachmentIntake:
         sha256: str,
         storage_path: Path,
         project_id: str | None,
+        is_canonical: bool = True,
     ) -> IntakeResult:
         existing = await self._get_by_sha(sha256)
         if existing is None:
@@ -347,6 +391,7 @@ class AttachmentIntake:
                 size_bytes=len(content),
                 storage_path=str(storage_path),
                 status=DocumentStatus.SKIPPED,
+                is_canonical=is_canonical,
                 error="image attachment: routed to the vision model, not indexed",
                 created_at=datetime.now(UTC),
             )

@@ -73,7 +73,7 @@ class DocumentIngestor:
                 )
 
             await self._set_status(record.id, DocumentStatus.CHUNKING)
-            chunks = self.chunk(extracted)
+            chunks = self.chunk(extracted, is_canonical=request.is_canonical)
             await self._persist_chunks(chunks)
 
             await self._set_status(record.id, DocumentStatus.EMBEDDING)
@@ -107,9 +107,9 @@ class DocumentIngestor:
             await self._set_failed(record.id, str(exc))
             raise
 
-    def chunk(self, extracted: ExtractedDocument) -> list[Chunk]:
+    def chunk(self, extracted: ExtractedDocument, *, is_canonical: bool = True) -> list[Chunk]:
         """The one implemented stage. Exposed so it can be used on its own."""
-        return self._chunker.chunk(extracted)
+        return self._chunker.chunk(extracted, is_canonical=is_canonical)
 
     # --- persistence -----------------------------------------------------
 
