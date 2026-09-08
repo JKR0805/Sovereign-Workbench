@@ -160,6 +160,7 @@ class DocumentRecord(SQLModel, table=True):
     page_count: int | None = None
     scanned_page_count: int | None = None
     status: DocumentStatus = Field(default=DocumentStatus.PENDING)
+    is_canonical: bool = Field(default=True, index=True)
     parser: str | None = None
     storage_path: str | None = None
     ingested_at: datetime | None = None

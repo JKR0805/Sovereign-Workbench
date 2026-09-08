@@ -29,6 +29,8 @@ import {
   Search,
   File,
   Layers,
+  BookmarkPlus,
+  Check,
 } from 'lucide-react';
 import { InferenceGraph } from '../components/inference/InferenceGraph';
 import { MarkdownRenderer } from '../components/primitives/MarkdownRenderer';
@@ -273,6 +275,16 @@ export default function WorkbenchPage() {
   } | null>(null);
   const [previewTab, setPreviewTab] = useState<'preview' | 'chunks'>('preview');
   const [imageLoadError, setImageLoadError] = useState(false);
+  const [promotedDocIds, setPromotedDocIds] = useState<Set<string>>(new Set());
+
+  const handlePromoteDocument = useCallback(async (docId: string) => {
+    try {
+      await api.promoteDocument(docId);
+      setPromotedDocIds((prev) => new Set([...prev, docId]));
+    } catch (err) {
+      console.error('Failed to promote document:', err);
+    }
+  }, []);
 
   const clearAttachment = useCallback(() => {
     if (attachedFile?.previewUrl && attachedFile.previewUrl.startsWith('blob:')) {
@@ -451,9 +463,9 @@ export default function WorkbenchPage() {
       textReader.readAsText(file.slice(0, 131072)); // Read up to 128KB for text preview
     }
 
-    // Pre-upload to Knowledge Base (path A)
+    // Upload as session attachment (canonical = false, session-scoped)
     try {
-      const doc = await api.uploadDocument(file);
+      const doc = await api.uploadDocument(file, undefined, false);
       setAttachedFile((prev) =>
         prev && prev.file === file ? { ...prev, uploading: false, documentId: doc.id, uploadError: undefined } : prev
       );
@@ -488,6 +500,7 @@ export default function WorkbenchPage() {
               mime: attachedForThisTurn.mime,
               size_bytes: attachedForThisTurn.sizeBytes,
               document_id: attachedForThisTurn.documentId,
+              data_base64: attachedForThisTurn.dataBase64,
               kind: isImageFile(attachedForThisTurn) ? 'image' : 'document',
             },
           ]
@@ -841,26 +854,57 @@ export default function WorkbenchPage() {
                         <span className="font-semibold">{msg.attachedFile.name}</span>
                         <span className="text-text-tertiary">({msg.attachedFile.info})</span>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setPreviewTab('preview');
-                          setImageLoadError(false);
-                          setFilePreviewModal({
-                            isOpen: true,
-                            name: msg.attachedFile!.name,
-                            info: msg.attachedFile!.info,
-                            previewUrl: msg.attachedFile!.previewUrl,
-                            textPreview: msg.attachedFile!.textPreview,
-                            documentId: msg.attachedFile!.documentId,
-                            mime: msg.attachedFile!.mime,
-                          });
-                        }}
-                        className="flex items-center gap-1 px-2 py-0.5 rounded bg-bg-surface hover:bg-bg-elevated border border-border/60 text-text-secondary hover:text-text-primary text-[11px] transition-colors"
-                      >
-                        <Eye className="w-3 h-3 text-accent" />
-                        <span>Preview File</span>
-                      </button>
+                      <div className="flex items-center gap-1.5">
+                        {msg.attachedFile.documentId && !isImageFile(msg.attachedFile) && (
+                          <button
+                            type="button"
+                            disabled={promotedDocIds.has(msg.attachedFile.documentId)}
+                            onClick={() => handlePromoteDocument(msg.attachedFile!.documentId!)}
+                            className={`flex items-center gap-1 px-2 py-0.5 rounded text-[11px] border transition-colors ${
+                              promotedDocIds.has(msg.attachedFile.documentId)
+                                ? 'bg-ok/10 text-ok border-ok/40 cursor-default'
+                                : 'bg-bg-surface hover:bg-bg-elevated border-border/60 text-accent hover:text-accent-hover cursor-pointer'
+                            }`}
+                            title={
+                              promotedDocIds.has(msg.attachedFile.documentId)
+                                ? 'Document is in permanent Knowledge Base'
+                                : 'Promote this document to the permanent Knowledge Base for all chats'
+                            }
+                          >
+                            {promotedDocIds.has(msg.attachedFile.documentId) ? (
+                              <>
+                                <Check className="w-3 h-3 text-ok" />
+                                <span>In Knowledge Base</span>
+                              </>
+                            ) : (
+                              <>
+                                <BookmarkPlus className="w-3 h-3 text-accent" />
+                                <span>Add to KB</span>
+                              </>
+                            )}
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setPreviewTab('preview');
+                            setImageLoadError(false);
+                            setFilePreviewModal({
+                              isOpen: true,
+                              name: msg.attachedFile!.name,
+                              info: msg.attachedFile!.info,
+                              previewUrl: msg.attachedFile!.previewUrl,
+                              textPreview: msg.attachedFile!.textPreview,
+                              documentId: msg.attachedFile!.documentId,
+                              mime: msg.attachedFile!.mime,
+                            });
+                          }}
+                          className="flex items-center gap-1 px-2 py-0.5 rounded bg-bg-surface hover:bg-bg-elevated border border-border/60 text-text-secondary hover:text-text-primary text-[11px] transition-colors"
+                        >
+                          <Eye className="w-3 h-3 text-accent" />
+                          <span>Preview File</span>
+                        </button>
+                      </div>
                     </div>
                     {msg.attachedFile.previewUrl && isImageFile(msg.attachedFile) && (
                       <button
@@ -1027,7 +1071,7 @@ export default function WorkbenchPage() {
                     </span>
                   )}
                   {attachedFile.documentId && (
-                    <span className="text-ok font-semibold">· Indexed</span>
+                    <span className="text-ok font-semibold">· Session Ready</span>
                   )}
                   {attachedFile.uploadError && (
                     <span className="text-error font-semibold flex items-center gap-1">
@@ -1141,6 +1185,36 @@ export default function WorkbenchPage() {
                         <span>Chunks</span>
                       </button>
                     </div>
+                  )}
+
+                  {filePreviewModal.documentId && !isImageFile({ name: filePreviewModal.name, mime: filePreviewModal.mime }) && (
+                    <button
+                      type="button"
+                      disabled={promotedDocIds.has(filePreviewModal.documentId)}
+                      onClick={() => handlePromoteDocument(filePreviewModal.documentId!)}
+                      className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-mono border transition-colors ${
+                        promotedDocIds.has(filePreviewModal.documentId)
+                          ? 'bg-ok/15 text-ok border-ok/40 cursor-default'
+                          : 'bg-accent/15 hover:bg-accent/25 border-accent/40 text-accent cursor-pointer'
+                      }`}
+                      title={
+                        promotedDocIds.has(filePreviewModal.documentId)
+                          ? 'Document is in permanent Knowledge Base'
+                          : 'Promote this document to the permanent Knowledge Base for all chats'
+                      }
+                    >
+                      {promotedDocIds.has(filePreviewModal.documentId) ? (
+                        <>
+                          <Check className="w-3.5 h-3.5 text-ok" />
+                          <span>In Knowledge Base</span>
+                        </>
+                      ) : (
+                        <>
+                          <BookmarkPlus className="w-3.5 h-3.5 text-accent" />
+                          <span>Add to Knowledge Base</span>
+                        </>
+                      )}
+                    </button>
                   )}
 
                   {filePreviewModal.previewUrl && (

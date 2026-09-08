@@ -537,8 +537,11 @@ export const api = {
   // ==========================================
   // 8. Knowledge & RAG
   // ==========================================
-  async getDocuments(projectId?: string): Promise<DocumentRead[]> {
-    const qs = projectId ? `?project_id=${encodeURIComponent(projectId)}` : '';
+  async getDocuments(projectId?: string, canonicalOnly?: boolean): Promise<DocumentRead[]> {
+    const params = new URLSearchParams();
+    if (projectId) params.set('project_id', projectId);
+    if (canonicalOnly !== undefined) params.set('canonical_only', String(canonicalOnly));
+    const qs = params.toString() ? `?${params.toString()}` : '';
     return apiFetch(`/knowledge/documents${qs}`);
   },
 
@@ -546,11 +549,18 @@ export const api = {
     return apiFetch(`/knowledge/documents/${encodeURIComponent(id)}`);
   },
 
-  async uploadDocument(file: File, projectId?: string): Promise<DocumentRead> {
+  async uploadDocument(file: File, projectId?: string, canonical = true): Promise<DocumentRead> {
     const formData = new FormData();
     formData.append('file', file);
-    const qs = projectId ? `?project_id=${encodeURIComponent(projectId)}` : '';
+    const params = new URLSearchParams();
+    if (projectId) params.set('project_id', projectId);
+    if (!canonical) params.set('canonical', 'false');
+    const qs = params.toString() ? `?${params.toString()}` : '';
     return apiFetch(`/knowledge/documents${qs}`, { method: 'POST', body: formData });
+  },
+
+  async promoteDocument(id: string): Promise<DocumentRead> {
+    return apiFetch(`/knowledge/documents/${encodeURIComponent(id)}/promote`, { method: 'POST' });
   },
 
   async deleteDocument(id: string): Promise<void> {

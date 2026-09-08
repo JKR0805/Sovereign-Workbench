@@ -30,6 +30,7 @@ Key mandatory requirements:
 | 8-Stage Routing Pipeline | Intake -> Vision Fallback -> Understand -> Retrieve -> Classify -> Execute -> Verify | `vajra.orchestrator`, `vajra.router.understand` |
 | Dynamic model pluggability | Declarative YAML profiles (`config/models/`) + SQLite synchronization | `vajra.registry.profiles` |
 | Multi-format local RAG | Tabular pandas parser, DOCX semantic parser, PyMuPDF tables, FastEmbed CPU, Qdrant | `vajra.rag` |
+| KB Cleanliness & Isolation | Session-only attachment tagging (`is_canonical: false`) + Explicit Promotion workflow | `vajra.rag.intake`, `vajra.rag.index`, `vajra.store` |
 | Multimodal Quality Fallback | Text coverage probe (< 15%), high-DPI rendering, vision model analysis | `vajra.rag.parse`, `vajra.orchestrator` |
 | Traceable citations | Numbered citation assembly (`[C1]`) with page and bbox provenance | `vajra.rag.citations` |
 | Multi-user & RBAC | Argon2id passwords, 32-byte crypto sessions, UserRole guards, chat isolation | `vajra.auth`, `vajra.orchestrator.conversations` |
@@ -212,30 +213,42 @@ Coding Specialist Model         General Intelligence Model
 ### Stage Details
 
 1. **Node 0: Attachment Intake & Multi-Format Parsing (`vajra.rag.intake`, `vajra.rag.parse`)**:
-   - Files enter through a single point of intake.
+   - Files enter through a unified intake pipeline with format detection and provenance tracking.
+   - **Session-Only vs. Canonical Flagging (`is_canonical`)**: Chat attachments default to `is_canonical: false` to ensure ephemeral or unverified documents do not pollute the global knowledge base. Files explicitly added to the Knowledge Base carry `is_canonical: true`.
    - **Tabular Data (`.csv`, `.tsv`, `.xlsx`, `.xls`)**: Parsed via `pandas`. Extracts column names and data types, row/column counts, and numerical descriptive statistics (`df.describe()`). Data is formatted into bounded markdown tables.
    - **Word Documents (`.docx`)**: Parsed via `python-docx` into semantic headings, lists, tables, and paragraphs.
    - **PDFs (`.pdf`)**: Parsed via PyMuPDF with `find_tables()` extracting structured grid rows into markdown tables.
-2. **Node 1: Multimodal Vision Preprocessing / Fallback (`vajra.orchestrator.service`)**:
-   - PageClassifier calculates text-layer area coverage.
-   - If coverage < 15% or pages are `SCANNED`, PyMuPDF renders base64 PNG pages (`pixmap(dpi=150)`).
-   - Dedicated vision model (`llava:7b`) describes visual elements, diagrams, or scanned handwriting.
-   - Normalizes visual output into `extracted_file_context`, freeing the answering model from needing vision capability.
+   - **Direct Image Attachments (`.png`, `.jpg`, `.jpeg`, `.webp`, `.gif`)**: Tagged as `DocumentStatus.SKIPPED` for text indexing and dispatched immediately to the multimodal vision specialist.
+
+2. **Node 1: Multimodal Vision Preprocessing / Image Analysis (`vajra.orchestrator.service`)**:
+   - **Direct Images**: When image attachments are supplied, `_intake_image` retrieves the raw file bytes, base64 encodes them, and delivers them directly to the local vision specialist model (`llava:7b`).
+   - **Scanned PDF Fallback**: For document uploads, `PageClassifier` calculates text-layer area coverage. If coverage < 15% or pages are `SCANNED`, PyMuPDF renders high-DPI base64 PNG pages (`pixmap(dpi=150)`).
+   - **Vision Normalization**: The vision specialist inspects the images, transcribing text, describing visual diagrams, schematics, charts, or handwriting, and compiles the analysis into `extracted_file_context`.
+   - **Decoupled Architecture**: Because vision analysis is completed during preprocessing, the downstream answering model does not need native vision capabilities—any high-performing general or coding model can reason over the extracted visual context.
+   - **Simultaneous Vision + RAG Grounding**: When a user request includes both an image attachment and requires information from the corporate knowledge base, the pipeline processes the image via Node 1 and simultaneously executes vector retrieval via Node 2. Both the vision analysis and the retrieved citations are synthesized into the model's final context window.
+
 3. **Stage 2: Semantic Query Understanding (`vajra.router.understand`)**:
    - Queries the general model to derive `enhanced_prompt` (optimized with domain entities and terminology for vector search).
    - Identifies if the task requires programming, script writing, or technical automation (`is_coding_task: bool`).
    - Invariant: `original_prompt` remains strictly immutable as the authoritative user intent.
-4. **Node 2: Scoped Vector Retrieval (`vajra.rag.retrieve`)**:
-   - Queries local Qdrant index using `enhanced_prompt`.
-   - Scopes search to the run's attached documents when present (`document_ids`), or searches the wider corpus.
+
+4. **Node 2: Dual-Scope Vector Retrieval & Knowledge Base Isolation (`vajra.rag.retrieve`, `vajra.rag.index`)**:
+   - Queries local Qdrant index using `enhanced_prompt` with CPU-offloaded FastEmbed embeddings.
+   - **Corpus-Wide Search**: When querying the general knowledge base (`document_ids` empty or omitted), Qdrant applies a strict payload filter: `FieldCondition(key="is_canonical", match=MatchValue(value=True))`. Ephemeral chat attachments are completely invisible.
+   - **Attachment-Scoped Search**: When documents are attached to the current chat turn or inherited from prior turns, the search is scoped explicitly to those `document_ids`, allowing immediate grounding without polluting the global index.
+   - **Explicit Promotion**: Users can inspect chat attachments in the UI and click "Add to Knowledge Base" (`POST /api/knowledge/documents/{id}/promote`). This updates SQLite and sets `is_canonical = True` across all chunk points in Qdrant, seamlessly graduating the document into the authoritative corpus.
+   - **Numbered Citations**: Results are assembled into numbered markers (`[C1]`, `[C2]`) carrying document filename, section path, and page provenance.
+
 5. **Node 3: Task Classification & Model Routing (`vajra.router`)**:
    - Analyzes `original_prompt`, `enhanced_prompt`, attachments, and `is_coding_task`.
    - Tasks with `is_coding_task=True` are mapped directly to `Capability.CODING`.
    - The capability router executes hard filters (VRAM, context, modalities) and computes 7-factor weighted scores.
    - Models are selected dynamically from `ModelRegistry` with zero hardcoded model names.
+
 6. **Node 4: Target Model Execution (`vajra.orchestrator.service`)**:
    - For coding tasks, formats execution with `STRUCTURED_CODING_SYSTEM_PROMPT` containing tabular schemas, descriptive stats, and execution constraints.
    - Streams tokens via SSE to the user interface.
+
 7. **Node 5: Sovereignty Verification**:
    - Reads the network ledger for the run duration.
    - Produces a verifiable verdict (`pass`, `fail`, `unverified`).

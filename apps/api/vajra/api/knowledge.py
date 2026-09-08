@@ -49,6 +49,7 @@ class DocumentRead(BaseModel):
     page_count: int | None
     scanned_page_count: int | None
     status: DocumentStatus
+    is_canonical: bool = True
     parser: str | None
     ingested_at: datetime | None
     error: str | None
@@ -66,6 +67,7 @@ class DocumentRead(BaseModel):
             page_count=record.page_count,
             scanned_page_count=record.scanned_page_count,
             status=record.status,
+            is_canonical=getattr(record, "is_canonical", True),
             parser=record.parser,
             ingested_at=record.ingested_at,
             error=record.error,
@@ -132,6 +134,7 @@ async def upload_document(
     file: UploadFile,
     context: Context,
     project_id: Annotated[str | None, Query()] = None,
+    canonical: Annotated[bool, Query()] = True,
 ) -> DocumentRead:
     """Upload a document. Persists it, hashes it, dedupes against anything
     already indexed, and runs it through the same
@@ -141,7 +144,11 @@ async def upload_document(
     content = await file.read()
 
     result = await context.attachment_intake.intake(
-        content, filename=filename, mime=file.content_type, project_id=project_id
+        content,
+        filename=filename,
+        mime=file.content_type,
+        project_id=project_id,
+        is_canonical=canonical,
     )
 
     if result.disposition is IntakeDisposition.UNSUPPORTED:
@@ -161,10 +168,28 @@ async def upload_document(
 async def list_documents(
     context: Context,
     project_id: Annotated[str | None, Query()] = None,
+    canonical_only: Annotated[bool | None, Query()] = None,
 ) -> list[DocumentRead]:
     async with context.database.session() as session:
-        records = await KnowledgeRepository(session).list_documents(project_id=project_id)
+        records = await KnowledgeRepository(session).list_documents(
+            project_id=project_id, canonical_only=canonical_only
+        )
     return [DocumentRead.from_record(record) for record in records]
+
+
+@router.post("/documents/{document_id}/promote", response_model=DocumentRead)
+async def promote_document(document_id: str, context: Context) -> DocumentRead:
+    """Promote an ephemeral chat attachment to the canonical Knowledge Base."""
+    async with context.database.session() as session:
+        repo = KnowledgeRepository(session)
+        record = await repo.set_canonical(document_id, True)
+    if record is None:
+        raise NotFound(f"Document {document_id!r} does not exist", document_id=document_id)
+
+    if context.rag_index is not None:
+        await context.rag_index.set_canonical(document_id, True)
+
+    return DocumentRead.from_record(record)
 
 
 @router.get("/documents/{document_id}", response_model=DocumentRead)

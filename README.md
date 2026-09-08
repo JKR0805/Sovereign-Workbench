@@ -88,6 +88,16 @@ It combines multi-model orchestration, multi-turn document persistence, local hy
    - Rich document preview with an interactive vector chunk inspector.
    - Real-time Network Security Console, Model Playground, and System Health auditor.
 
+7. **Clean Vector Indexing & Explicit Promotion**:
+   - Chat attachments default to session-only isolation (`is_canonical: false`), keeping the global knowledge base authoritative, clean, and unpolluted by ephemeral or unvetted files.
+   - Users can promote any vetted chat attachment directly into the permanent knowledge base with a single click in the UI or via `POST /api/knowledge/documents/{id}/promote`.
+   - Global RAG searches strictly filter for canonical documents (`is_canonical: true`), while attachment-scoped searches allow prompt grounding on active run attachments.
+
+8. **Unified Multimodal Vision & Fallback**:
+   - Direct image attachments (`.png`, `.jpg`, `.webp`, etc.) and scanned PDF pages (coverage < 15%) are automatically preprocessed by the local vision specialist model (`llava:7b`).
+   - Normalizes visual layouts, charts, and handwritten text into rich markdown context, allowing any downstream model (including specialized coding models) to reason over images without requiring native vision weights.
+   - Seamlessly combines multimodal vision analysis and knowledge base RAG retrieval in a single query turn.
+
 ---
 
 ## Quick Start (Local Setup)

@@ -513,6 +513,7 @@ export interface DocumentRead {
   page_count: number | null;
   scanned_page_count: number | null;
   status: DocumentStatus;
+  is_canonical?: boolean;
   parser: string | null;
   ingested_at: string | null;
   error: string | null;

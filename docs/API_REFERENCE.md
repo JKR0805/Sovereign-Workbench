@@ -306,16 +306,53 @@ Streams real-time execution steps, model arbitration, and LLM output tokens. Sup
 ### 5.1 Ingest Document
 `POST /api/knowledge/documents`
 
-Uploads and processes documents into the sovereign knowledge base.
+Uploads, parses, chunks, and embeds documents into the sovereign knowledge base or session context.
+
+#### Query Parameters
+- `canonical` (optional, boolean, default: `true`):
+  - When `true` (default for Knowledge Base uploads): The document is ingested as an authoritative canonical source, searchable across all corpus-wide queries.
+  - When `false` (used for chat message attachments): The document is ingested as a **session-only** artifact. Chunks are tagged with `is_canonical: false`, isolating them from the general corpus search while remaining retrievable when explicitly scoped to the run.
 
 #### Form Data
-- `file`: Binary file (`.pdf`, `.docx`, `.csv`, `.xlsx`, `.xls`, `.tsv`, `.txt`, `.md`, `.json`, `.log`).
+- `file`: Binary file.
+  - **Structured / Text Formats**: `.pdf`, `.docx`, `.csv`, `.xlsx`, `.xls`, `.tsv`, `.txt`, `.md`, `.json`, `.log`.
+  - **Image Formats**: `.png`, `.jpg`, `.jpeg`, `.webp`, `.gif` (preprocessed via multimodal vision specialist model `llava:7b`).
 - `title` (optional): Human-readable document name.
 
 #### Response (201 Created)
 ```json
 {
-  "document": {
+  "id": "doc_8c1b29a4e",
+  "title": "server_telemetry.csv",
+  "filename": "server_telemetry.csv",
+  "mime": "text/csv",
+  "size_bytes": 1024,
+  "chunk_count": 2,
+  "page_count": 1,
+  "scanned_page_count": 0,
+  "summary": "Tabular file (100 rows, 4 columns). Schema: id (int64), latency_ms (float64)",
+  "status": "ready",
+  "is_canonical": true,
+  "created_at": "2026-09-08T15:00:00Z"
+}
+```
+
+---
+
+### 5.2 List Documents
+`GET /api/knowledge/documents`
+
+Lists ingested documents with pagination and canonical filtering.
+
+#### Query Parameters
+- `canonical_only` (optional, boolean, default: `true`): If `true`, returns only authoritative knowledge base documents. If `false`, returns all documents including session-only chat attachments.
+- `limit` (optional, integer, default: `100`): Maximum records to return.
+- `offset` (optional, integer, default: `0`): Pagination offset.
+
+#### Response (200 OK)
+```json
+[
+  {
     "id": "doc_8c1b29a4e",
     "title": "server_telemetry.csv",
     "filename": "server_telemetry.csv",
@@ -325,29 +362,80 @@ Uploads and processes documents into the sovereign knowledge base.
     "page_count": 1,
     "scanned_page_count": 0,
     "summary": "Tabular file (100 rows, 4 columns). Schema: id (int64), latency_ms (float64)",
-    "status": "ready"
+    "status": "ready",
+    "is_canonical": true,
+    "created_at": "2026-09-08T15:00:00Z"
   }
+]
+```
+
+---
+
+### 5.3 Promote Document to Canonical Knowledge Base
+`POST /api/knowledge/documents/{document_id}/promote`
+
+Explicitly promotes a session-only document (such as a vetted chat attachment) into the permanent, authoritative knowledge base.
+
+#### Behavior
+1. Updates the SQLite record: `documents.is_canonical = 1`.
+2. Updates all vector point payloads in Qdrant: `is_canonical = true`.
+3. The document immediately becomes discoverable in all future corpus-wide searches.
+
+#### Response (200 OK)
+Returns the updated `DocumentRead` object:
+```json
+{
+  "id": "doc_8c1b29a4e",
+  "title": "emergency_protocol.md",
+  "filename": "emergency_protocol.md",
+  "mime": "text/markdown",
+  "size_bytes": 512,
+  "chunk_count": 1,
+  "page_count": 1,
+  "scanned_page_count": 0,
+  "summary": "Emergency protocols",
+  "status": "ready",
+  "is_canonical": true,
+  "created_at": "2026-09-08T15:00:00Z"
 }
 ```
 
 ---
 
-### 5.2 Search Knowledge Base
+### 5.4 Document Management & Chunks
+
+- `GET /api/knowledge/documents/{document_id}`: Retrieves document metadata.
+- `DELETE /api/knowledge/documents/{document_id}`: Deletes document record, associated chunks from SQLite, and vector embeddings from Qdrant (`204 No Content`).
+- `GET /api/knowledge/documents/{document_id}/chunks`: Returns an array of parsed text chunks with token counts, headings, and page boundaries.
+
+---
+
+### 5.5 Search Knowledge Base
 `POST /api/knowledge/search`
+
+Executes dual-mode semantic vector search with numbered citation assembly.
 
 #### Request Body
 ```json
 {
   "query": "turbopump vibration limits",
+  "document_ids": ["doc_8c1b29a4e"],
   "top_k": 5,
   "threshold": 0.4
 }
 ```
 
+#### Dual-Scope Retrieval Modes
+- **Corpus Search** (`document_ids` is `null` or `[]`):
+  Enforces a strict Qdrant payload filter `is_canonical == true`. Only verified, authoritative knowledge base documents are searched. Session-only chat attachments are completely excluded.
+- **Attachment-Scoped Search** (`document_ids` contains IDs):
+  Queries chunks belonging strictly to the specified document IDs (used during chat execution when attachments are active), allowing session-only documents to ground the prompt without polluting the global index.
+
 #### Response (200 OK)
 ```json
 {
-  "results": [
+  "query": "turbopump vibration limits",
+  "chunks": [
     {
       "chunk_id": "chk_1849a",
       "document_id": "doc_8c1b29a4e",
@@ -356,9 +444,14 @@ Uploads and processes documents into the sovereign knowledge base.
       "score": 0.892,
       "section_path": "Turbopump TP-800 > Spectral Bands",
       "page_from": 2,
-      "page_to": 2
+      "page_to": 2,
+      "marker": "[C1]"
     }
-  ]
+  ],
+  "timings": {
+    "embed_ms": 12.4,
+    "search_ms": 4.1
+  }
 }
 ```
 
