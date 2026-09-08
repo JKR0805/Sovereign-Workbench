@@ -112,11 +112,11 @@ class PyMuPDFParser:
             return await self._parse_tabular(path, document_id=document_id, title=title)
         if suffix == ".docx":
             return await self._parse_docx(path, document_id=document_id, title=title)
-        if suffix in (".txt", ".md", ".json", ".log"):
+        if suffix in (".txt", ".md", ".json", ".log", ".py", ".yaml", ".yml", ".sh", ".sql"):
             return await self._parse_text(path, document_id=document_id, title=title)
         raise ValueError(
             f"Unsupported document format: '{suffix}'. "
-            "Supported formats: .pdf, .docx, .csv, .xlsx, .xls, .tsv, .txt, .md, .json, .log"
+            "Supported formats: .pdf, .docx, .csv, .xlsx, .xls, .tsv, .txt, .md, .json, .log, .py, .yaml, .yml, .sh, .sql"
         )
 
     async def _parse_pdf(self, path: Path, *, document_id: str, title: str) -> ExtractedDocument:

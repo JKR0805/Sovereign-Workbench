@@ -41,7 +41,23 @@ IMAGE_EXTENSIONS: frozenset[str] = frozenset(
     {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tiff"}
 )
 PARSEABLE_EXTENSIONS: frozenset[str] = frozenset(
-    {".pdf", ".docx", ".csv", ".xlsx", ".xls", ".tsv", ".txt", ".md", ".json", ".log"}
+    {
+        ".pdf",
+        ".docx",
+        ".csv",
+        ".xlsx",
+        ".xls",
+        ".tsv",
+        ".txt",
+        ".md",
+        ".json",
+        ".log",
+        ".py",
+        ".yaml",
+        ".yml",
+        ".sh",
+        ".sql",
+    }
 )
 
 #: How much of a file to sniff when neither mime nor extension resolves it.

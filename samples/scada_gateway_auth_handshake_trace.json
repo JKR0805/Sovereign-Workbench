@@ -1,0 +1,245 @@
+{
+  "document_type": "synthetic_scada_incident",
+  "document_id": "INC-AGW-2026-0819-044",
+  "classification": "TEST DATA - AIRGAPPED ENVIRONMENT",
+  "incident": {
+    "title": "Airgapped SCADA Gateway Authentication and Handshake Failure",
+    "severity": "HIGH",
+    "status": "RESOLVED",
+    "opened_at": "2026-08-19T04:17:31.119Z",
+    "resolved_at": "2026-08-19T05:03:44.902Z",
+    "affected_zone": "CONTROL-NET-03",
+    "gateway": {
+      "node_id": "GW-SCADA-17",
+      "firmware": "7.4.18-synth",
+      "network_segment": "AIRGAP-B",
+      "role": "authentication_gateway"
+    },
+    "client": {
+      "node_id": "HMI-OPS-04",
+      "application": "operator-console",
+      "session_id": "SES-8A42-CC91"
+    }
+  },
+  "event_log": [
+    {
+      "sequence": 1,
+      "timestamp": "2026-08-19T04:17:31.119Z",
+      "node_id": "HMI-OPS-04",
+      "event": "AUTH_REQUEST",
+      "result": "SENT",
+      "metadata": {
+        "protocol": "SYNTH-AUTH/2",
+        "nonce_length": 32,
+        "certificate_serial": "00AF19D2"
+      }
+    },
+    {
+      "sequence": 2,
+      "timestamp": "2026-08-19T04:17:31.402Z",
+      "node_id": "GW-SCADA-17",
+      "event": "AUTH_REQUEST_RECEIVED",
+      "result": "RECEIVED",
+      "metadata": {
+        "queue_depth": 3,
+        "clock_offset_ms": 14
+      }
+    },
+    {
+      "sequence": 3,
+      "timestamp": "2026-08-19T04:17:31.447Z",
+      "node_id": "GW-SCADA-17",
+      "event": "CERTIFICATE_VALIDATION",
+      "result": "FAILED",
+      "error": {
+        "code": "0xA17F",
+        "symbol": "ERR_CERT_CHAIN_EPOCH",
+        "message": "Certificate trust epoch does not match gateway trust store."
+      }
+    },
+    {
+      "sequence": 4,
+      "timestamp": "2026-08-19T04:17:31.451Z",
+      "node_id": "GW-SCADA-17",
+      "event": "HANDSHAKE_ABORT",
+      "result": "REJECTED",
+      "error": {
+        "code": "0xB203",
+        "symbol": "ERR_HANDSHAKE_POLICY",
+        "message": "Handshake terminated by local authentication policy."
+      }
+    },
+    {
+      "sequence": 5,
+      "timestamp": "2026-08-19T04:17:32.009Z",
+      "node_id": "HMI-OPS-04",
+      "event": "AUTH_RESPONSE",
+      "result": "TIMEOUT",
+      "metadata": {
+        "timeout_ms": 500,
+        "retry": 1
+      }
+    },
+    {
+      "sequence": 6,
+      "timestamp": "2026-08-19T04:17:32.642Z",
+      "node_id": "HMI-OPS-04",
+      "event": "AUTH_REQUEST",
+      "result": "RETRY",
+      "metadata": {
+        "retry": 2
+      }
+    },
+    {
+      "sequence": 7,
+      "timestamp": "2026-08-19T04:17:32.821Z",
+      "node_id": "GW-SCADA-17",
+      "event": "AUTH_REQUEST_RECEIVED",
+      "result": "RECEIVED",
+      "metadata": {
+        "queue_depth": 4,
+        "clock_offset_ms": 14
+      }
+    },
+    {
+      "sequence": 8,
+      "timestamp": "2026-08-19T04:17:32.871Z",
+      "node_id": "GW-SCADA-17",
+      "event": "CERTIFICATE_VALIDATION",
+      "result": "FAILED",
+      "error": {
+        "code": "0xA17F",
+        "symbol": "ERR_CERT_CHAIN_EPOCH",
+        "message": "Certificate trust epoch does not match gateway trust store."
+      }
+    },
+    {
+      "sequence": 9,
+      "timestamp": "2026-08-19T04:18:01.202Z",
+      "node_id": "AUTH-SVC-02",
+      "event": "TRUST_STORE_QUERY",
+      "result": "SUCCESS",
+      "metadata": {
+        "active_epoch": 41,
+        "gateway_epoch": 40,
+        "client_epoch": 41
+      }
+    },
+    {
+      "sequence": 10,
+      "timestamp": "2026-08-19T04:18:12.884Z",
+      "node_id": "AUDIT-LEDGER-01",
+      "event": "CHECKPOINT",
+      "result": "COMMITTED",
+      "metadata": {
+        "checkpoint_id": "CP-20260819-0418-001",
+        "previous_hash": "8f9c0f4eab19d021",
+        "current_hash": "ca7e92b1f6408d73"
+      }
+    },
+    {
+      "sequence": 11,
+      "timestamp": "2026-08-19T04:41:17.403Z",
+      "node_id": "GW-SCADA-17",
+      "event": "TRUST_STORE_SYNCHRONIZATION",
+      "result": "SUCCESS",
+      "metadata": {
+        "old_epoch": 40,
+        "new_epoch": 41,
+        "records_added": 3
+      }
+    },
+    {
+      "sequence": 12,
+      "timestamp": "2026-08-19T04:42:05.228Z",
+      "node_id": "HMI-OPS-04",
+      "event": "AUTH_REQUEST",
+      "result": "SENT",
+      "metadata": {
+        "retry": 3
+      }
+    },
+    {
+      "sequence": 13,
+      "timestamp": "2026-08-19T04:42:05.513Z",
+      "node_id": "GW-SCADA-17",
+      "event": "CERTIFICATE_VALIDATION",
+      "result": "SUCCESS",
+      "metadata": {
+        "trust_epoch": 41
+      }
+    },
+    {
+      "sequence": 14,
+      "timestamp": "2026-08-19T04:42:05.611Z",
+      "node_id": "GW-SCADA-17",
+      "event": "HANDSHAKE",
+      "result": "SUCCESS",
+      "metadata": {
+        "session_id": "SES-8A42-CC91",
+        "duration_ms": 98
+      }
+    },
+    {
+      "sequence": 15,
+      "timestamp": "2026-08-19T05:03:44.902Z",
+      "node_id": "AUDIT-LEDGER-01",
+      "event": "INCIDENT_CLOSE",
+      "result": "COMMITTED",
+      "metadata": {
+        "incident_id": "INC-AGW-2026-0819-044",
+        "checkpoint_id": "CP-20260819-0503-004"
+      }
+    }
+  ],
+  "error_trace": {
+    "language": "python",
+    "service": "synthetic-auth-adapter",
+    "exception": "TrustEpochMismatch",
+    "message": "gateway trust epoch 40 != client trust epoch 41",
+    "traceback": [
+      "Traceback (most recent call last):",
+      "  File \"/opt/synth-auth/session.py\", line 214, in authenticate",
+      "    gateway.verify_certificate(peer_certificate)",
+      "  File \"/opt/synth-auth/trust.py\", line 87, in verify_certificate",
+      "    raise TrustEpochMismatch(gateway_epoch, certificate_epoch)",
+      "TrustEpochMismatch: gateway trust epoch 40 != certificate epoch 41"
+    ],
+    "correlation_id": "CORR-71D4E2A9"
+  },
+  "audit_ledger": {
+    "algorithm": "SHA-256-SYNTH",
+    "ledger_node": "AUDIT-LEDGER-01",
+    "checkpoints": [
+      {
+        "checkpoint_id": "CP-20260819-0418-001",
+        "sequence_start": 1,
+        "sequence_end": 9,
+        "hash": "ca7e92b1f6408d73",
+        "status": "VALID"
+      },
+      {
+        "checkpoint_id": "CP-20260819-0503-004",
+        "sequence_start": 10,
+        "sequence_end": 15,
+        "hash": "5b218a8e3a71f902",
+        "status": "VALID"
+      }
+    ]
+  },
+  "root_cause": {
+    "category": "CONFIGURATION_DRIFT",
+    "finding": "Gateway trust store was one trust epoch behind the authentication service.",
+    "contributing_factors": [
+      "Scheduled synchronization had not completed.",
+      "Authentication policy correctly rejected the stale trust chain.",
+      "Retry behavior increased event volume without changing the underlying condition."
+    ]
+  },
+  "resolution": {
+    "action": "SYNCHRONIZE_SYNTHETIC_TRUST_STORE",
+    "result": "SUCCESS",
+    "verification": "Subsequent authentication and handshake completed successfully.",
+    "restart_required": false
+  }
+}

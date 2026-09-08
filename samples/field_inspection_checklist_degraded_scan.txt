@@ -1,0 +1,142 @@
+FIELD INSPECTION / MAINTENANCE CHECKLIST
+=========================================
+
+DOCUMENT NO: FI-9042-B
+PAGE: 1 OF 2
+SITE: NORTH ANNEX / UTILITY CORRIDOR
+DATE: 18/08/26
+SHIFT: B
+INSPECTOR: R. MENON
+WORK ORDER: WO-26-0818-117
+
+[IMAGE QUALITY: DEGRADED]
+[LEFT EDGE PARTIALLY CUT OFF]
+[HANDWRITING PRESENT]
+
+EQUIPMENT IDENTIFICATION
+-------------------------
+
+TAG-TX-9042-B
+EQUIPMENT: AUXILIARY TRANSFER UNIT
+AREA: U-4 / BAY 07
+MANUFACTURER: NEXTRON INDUSTRIAL
+SERIAL: NXT-44?19-7B
+
+CHECKLIST
+
+01  [X] TAG IDENTIFICATION VERIFIED
+02  [X] NAMEPLATE LEGIBLE
+03  [ ] ACCESS PANEL CONDITION
+04  [X] FASTENER CONDITION
+05  [X] CONNECTOR SEATING
+06  [ ] CABLE ROUTING
+07  [X] ENCLOSURE CONDITION
+08  [X] GROUNDING LABEL PRESENT
+09  [ ] CORROSION CHECK
+10  [X] GENERAL CLEANLINESS
+
+MARGINAL NOTE:
+"03 - panel screw loose, tightened during inspection"
+written beside item 03.
+
+MARGINAL NOTE:
+"cable tie missing on lower run"
+written beside item 06.
+
+MARGINAL NOTE:
+"rust? only surface - verify next round"
+written beside item 09.
+
+VISUAL OBSERVATIONS
+-------------------
+
+Panel:
+[OK] upper enclosure
+[OK] indicator window
+[?] lower right corner shows dark mark
+
+Connector:
+[OK] J4
+[OK] J5
+[WARN] J7 label partly obscured
+
+Cable:
+main harness routed along tray
+lower branch appears unsupported for approximately short section
+
+SURFACE CONDITION
+
+TOP PLATE ................ CLEAN
+LEFT SIDE ................ LIGHT DUST
+RIGHT SIDE ............... MARK / STAIN
+LOWER PANEL .............. SCRATCHED
+FASTENER AREA ............ ACCEPTABLE AFTER TIGHTENING
+
+READINGS RECORDED
+
+Ambient: 28 C
+Enclosure: 31 C
+Local indicator: 30 C
+Pressure indication: 4.8 [unit obscured]
+Vibration indication: 1.7 [unit obscured]
+
+NOTE: instrument units are partly unreadable in scan.
+
+---------------------------------------------
+PAGE 2
+---------------------------------------------
+
+MAINTENANCE LOG
+
+TIME       ACTION                         TECH
+08:10      visual inspection              RM
+08:17      panel opened                   RM
+08:24      loose fastener corrected       RM
+08:31      connector inspection           RM
+08:37      cable route photographed       RM
+08:44      enclosure closed               RM
+
+EQUIPMENT TAG CHECK
+
+TAG-TX-9042-B       [X]
+TAG-TX-9042-A       [ ] 
+TAG-TX-9042-C       [ ]
+
+CAUTION LABELS
+
+HIGH VOLTAGE       [X]
+ROTATING EQUIPMENT [X]
+SERVICE ISOLATION  [X]
+WARNING LABEL      [?] lower edge damaged
+
+INSPECTION RESULT
+
+[ ] PASS
+[X] PASS WITH OBSERVATIONS
+[ ] FAIL
+[ ] REQUIRES IMMEDIATE ESCALATION
+
+FOLLOW-UP ITEMS
+
+A. Replace / restore missing lower cable support.
+B. Verify J7 identification label.
+C. Reinspect surface mark at next scheduled inspection.
+D. Confirm warning-label legibility.
+E. Confirm unreadable instrument units from source record.
+
+HANDWRITTEN FINAL NOTE:
+"Nothing abnormal during running check. Cable support still needs fixing.
+Don't close WO until photos are attached."
+
+SIGNATURE:
+R. Menon
+18-08-26
+
+SCAN ARTIFACTS:
+- Characters "B" and "8" are visually similar in TAG identifiers.
+- Several horizontal strokes cross printed text.
+- The pressure-unit field is truncated.
+- One checkbox appears darker than surrounding checkboxes.
+- Page boundary cuts approximately 3 mm from the right margin.
+
+END OF SCANNED TEST DOCUMENT

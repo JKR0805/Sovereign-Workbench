@@ -97,14 +97,15 @@ class SemanticUnderstandingEngine:
         # Attempt General Model semantic query
         try:
             candidates = await self._registry.list(enabled_only=True)
-            # Select general-purpose reasoning model (has REASONING/TEXT capabilities)
+            # Select general-purpose reasoning model (has REASONING/TEXT capabilities, not a vision or coding specialist)
             general_candidates = [
                 m
                 for m in candidates
                 if (Capability.REASONING.value in m.capabilities or Capability.TEXT.value in m.capabilities)
+                and Capability.VISION.value not in m.capabilities
                 and (Capability.CODING.value not in m.capabilities or len(m.capabilities) > 2)
             ]
-            general_model = next(iter(general_candidates), next(iter(candidates), None))
+            general_model = next(iter(general_candidates), None)
 
             if general_model is not None:
                 adapter = await self._runtimes.adapter(general_model.runtime_id)
