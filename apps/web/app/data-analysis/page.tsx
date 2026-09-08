@@ -17,6 +17,7 @@ import {
   Cpu,
   ChevronDown
 } from 'lucide-react';
+import { MockBadge } from '../../components/primitives/MockBadge';
 
 export default function DataAnalysisPage() {
   const [selectedUnit, setSelectedUnit] = useState('Distillation Column (DC-101)');
@@ -37,9 +38,12 @@ export default function DataAnalysisPage() {
       {/* Header matching Reference Image 2 Bottom Center */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-border pb-4">
         <div>
-          <h1 className="text-xl font-bold tracking-tight text-text-primary">
-            Live Data Analysis
-          </h1>
+          <div className="flex items-center gap-2.5">
+            <h1 className="text-xl font-bold tracking-tight text-text-primary">
+              Live Data Analysis
+            </h1>
+            <MockBadge label="Simulated Telemetry" size="sm" />
+          </div>
           <p className="text-xs text-text-secondary">
             Connect to operational data and get AI-powered insights
           </p>
@@ -57,10 +61,7 @@ export default function DataAnalysisPage() {
             <option>Crude Distillation Unit (CDU-100)</option>
           </select>
 
-          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-ok/10 border border-ok/20 text-ok text-xs font-mono font-medium">
-            <span className="w-2 h-2 rounded-full bg-ok animate-pulse" />
-            <span>Live Data</span>
-          </div>
+          <MockBadge label="Simulated Stream" size="md" />
         </div>
       </div>
 

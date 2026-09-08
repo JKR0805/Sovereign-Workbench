@@ -1,8 +1,9 @@
 'use client';
 
-import React, { useState } from 'react';
-import { api } from '../../lib/api';
-import { SimulateResponse } from '../../lib/types';
+import React, { useState, useEffect } from 'react';
+import { api, useIsMock } from '../../lib/api';
+import { SimulateResponse, RoutingPolicy } from '../../lib/types';
+import { MockBadge } from '../../components/primitives/MockBadge';
 import {
   Sliders,
   Play,
@@ -11,13 +12,20 @@ import {
   AlertCircle,
   Cpu,
   Layers,
-  HelpCircle
+  HelpCircle,
+  Save
 } from 'lucide-react';
 
 export default function RoutingStudioPage() {
+  const isRoutingMock = useIsMock('routing');
   const [prompt, setPrompt] = useState(
     'Review this heat exchanger inspection report and verify if wall thickness complies with ASME safety limits.'
   );
+
+  const [policies, setPolicies] = useState<RoutingPolicy[]>([]);
+  const [selectedPolicyId, setSelectedPolicyId] = useState<string>('default-institutional');
+  const [saving, setSaving] = useState(false);
+  const [saveMessage, setSaveMessage] = useState<string | null>(null);
 
   // 7 Scoring Weights matching FRONTEND_SPECIFICATION.md Section 4.5
   const [weights, setWeights] = useState({
@@ -32,6 +40,22 @@ export default function RoutingStudioPage() {
 
   const [simResult, setSimResult] = useState<SimulateResponse | null>(null);
   const [simulating, setSimulating] = useState(false);
+
+  useEffect(() => {
+    loadPolicies();
+  }, []);
+
+  const loadPolicies = async () => {
+    try {
+      const list = await api.getRoutingPolicies();
+      setPolicies(list);
+      if (list.length > 0 && list[0].weights) {
+        setWeights(list[0].weights);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
 
   const handleSimulate = async () => {
     setSimulating(true);
@@ -48,28 +72,64 @@ export default function RoutingStudioPage() {
     }
   };
 
+  const handleSavePolicy = async () => {
+    setSaving(true);
+    try {
+      await api.saveRoutingPolicy(selectedPolicyId, {
+        weights,
+      });
+      setSaveMessage('Policy weights successfully persisted');
+      setTimeout(() => setSaveMessage(null), 3000);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <div className="p-6 max-w-6xl mx-auto flex flex-col gap-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-border pb-4">
         <div>
-          <h1 className="text-xl font-bold tracking-tight text-text-primary">
-            Routing Studio
-          </h1>
-          <p className="text-xs text-text-secondary">
+          <div className="flex items-center gap-2.5">
+            <h1 className="text-xl font-bold tracking-tight text-text-primary">
+              Routing Studio
+            </h1>
+            {isRoutingMock && <MockBadge label="Mock Engine" size="sm" />}
+          </div>
+          <p className="text-sm text-text-secondary">
             Visual policy editor, 7-factor scoring weights tuner, and deterministic arbitration simulator
           </p>
         </div>
 
-        <button
-          onClick={handleSimulate}
-          disabled={simulating}
-          className="flex items-center gap-1.5 px-3.5 py-2 rounded-md bg-accent hover:bg-accent-hover text-white text-xs font-semibold shadow transition-all self-start sm:self-auto"
-        >
-          <Play className="w-3.5 h-3.5 fill-current" />
-          <span>{simulating ? 'Simulating Pipeline...' : 'Run Simulation'}</span>
-        </button>
+        <div className="flex items-center gap-2.5 self-start sm:self-auto">
+          <button
+            onClick={handleSavePolicy}
+            disabled={saving}
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-md bg-bg-panel border border-border hover:border-accent text-text-primary hover:text-accent text-xs font-semibold font-mono shadow transition-all"
+          >
+            <Save className="w-3.5 h-3.5" />
+            <span>{saving ? 'Saving...' : 'Save Policy'}</span>
+          </button>
+
+          <button
+            onClick={handleSimulate}
+            disabled={simulating}
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-md bg-accent hover:bg-accent-hover text-white text-xs font-semibold font-mono shadow transition-all"
+          >
+            <Play className="w-3.5 h-3.5 fill-current" />
+            <span>{simulating ? 'Simulating Pipeline...' : 'Run Simulation'}</span>
+          </button>
+        </div>
       </div>
+
+      {saveMessage && (
+        <div className="p-3 rounded-md bg-ok-muted border border-ok/30 text-ok text-xs font-mono flex items-center gap-2 animate-in fade-in duration-150">
+          <CheckCircle2 className="w-4 h-4" />
+          <span>{saveMessage}</span>
+        </div>
+      )}
 
       {/* Main Grid: Policy Pipeline Canvas + Weight Tuner */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -79,7 +139,7 @@ export default function RoutingStudioPage() {
             <span className="text-xs font-bold font-mono uppercase text-text-primary">
               5-Stage Dynamic Routing Pipeline
             </span>
-            <span className="text-[11px] font-mono text-ok">Pure Function · Zero Hardcoded Models</span>
+            <span className="text-xs font-mono text-ok">Pure Function · Zero Hardcoded Models</span>
           </div>
 
           {/* SVG Pipeline Graph */}
@@ -104,8 +164,8 @@ export default function RoutingStudioPage() {
                     {i + 1}
                   </span>
                   <div>
-                    <div className="font-semibold text-xs text-text-primary">{st.stage}</div>
-                    <div className="text-[11px] text-text-tertiary font-mono">{st.desc}</div>
+                    <div className="font-semibold text-sm text-text-primary">{st.stage}</div>
+                    <div className="text-xs text-text-tertiary font-mono">{st.desc}</div>
                   </div>
                 </div>
 
@@ -135,10 +195,10 @@ export default function RoutingStudioPage() {
         {/* Right: 7-Factor Scoring Sliders Panel */}
         <div className="bg-bg-panel border border-border rounded-lg p-5 flex flex-col gap-4">
           <div>
-            <h2 className="text-xs font-bold text-text-primary uppercase tracking-wider font-mono">
+            <h2 className="text-sm font-bold text-text-primary uppercase tracking-wider font-mono">
               7-Factor Scoring Weights
             </h2>
-            <p className="text-[11px] text-text-tertiary">
+            <p className="text-xs text-text-tertiary">
               Adjust arbitration weights for hardware profile
             </p>
           </div>
@@ -146,7 +206,7 @@ export default function RoutingStudioPage() {
           <div className="flex flex-col gap-3 text-xs font-mono">
             {Object.entries(weights).map(([k, val]) => (
               <div key={k} className="flex flex-col gap-1">
-                <div className="flex justify-between text-[11px]">
+                <div className="flex justify-between text-xs">
                   <span className="capitalize text-text-secondary">{k} Weight</span>
                   <span className="font-bold text-text-primary">w = {val.toFixed(2)}</span>
                 </div>

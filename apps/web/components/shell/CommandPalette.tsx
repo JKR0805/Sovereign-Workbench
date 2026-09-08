@@ -109,7 +109,7 @@ export const CommandPalette: React.FC = () => {
                     </span>
                   </div>
                   {cmd.badge && (
-                    <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-warn/15 text-warn border border-warn/30">
+                    <span className="text-xs font-mono px-2 py-0.5 rounded bg-warn/15 text-warn border border-warn/30">
                       {cmd.badge}
                     </span>
                   )}
@@ -120,7 +120,7 @@ export const CommandPalette: React.FC = () => {
         </div>
 
         {/* Footer */}
-        <div className="px-4 py-2 border-t border-border bg-bg-panel/50 flex items-center justify-between text-[11px] font-mono text-text-tertiary">
+        <div className="px-4 py-2 border-t border-border bg-bg-panel/50 flex items-center justify-between text-xs font-mono text-text-tertiary">
           <span>Navigate with mouse or arrow keys</span>
           <span>Sovereign Airgap Mode</span>
         </div>

@@ -2,9 +2,10 @@
 
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { api } from '../../lib/api';
+import { api, useIsMock } from '../../lib/api';
 import { DocumentRead, KnowledgeSearchResponse } from '../../lib/types';
 import { StatusDot } from '../../components/primitives/StatusDot';
+import { MockBadge } from '../../components/primitives/MockBadge';
 import {
   UploadCloud,
   FileText,
@@ -20,6 +21,7 @@ import {
 } from 'lucide-react';
 
 export default function KnowledgePage() {
+  const isKnowledgeMock = useIsMock('knowledge');
   const [documents, setDocuments] = useState<DocumentRead[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
@@ -31,12 +33,7 @@ export default function KnowledgePage() {
   const [searchResults, setSearchResults] = useState<KnowledgeSearchResponse | null>(null);
   const [searching, setSearching] = useState(false);
 
-  useEffect(() => {
-    loadDocs();
-  }, []);
-
   const loadDocs = async () => {
-    setLoading(true);
     try {
       const data = await api.getDocuments();
       setDocuments(data);
@@ -46,6 +43,10 @@ export default function KnowledgePage() {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    loadDocs();
+  }, []);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -95,9 +96,12 @@ export default function KnowledgePage() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-border pb-4">
         <div>
-          <h1 className="text-xl font-bold tracking-tight text-text-primary">
-            Document Analysis
-          </h1>
+          <div className="flex items-center gap-3">
+            <h1 className="text-xl font-bold tracking-tight text-text-primary">
+              Document Analysis
+            </h1>
+            {isKnowledgeMock && <MockBadge label="Mock Corpus" size="sm" />}
+          </div>
           <p className="text-xs text-text-secondary">
             Upload and analyze your documents securely on local infrastructure
           </p>
@@ -181,7 +185,7 @@ export default function KnowledgePage() {
                     >
                       {doc.filename}
                     </Link>
-                    <div className="text-[11px] text-text-tertiary font-mono flex items-center gap-2">
+                    <div className="text-xs text-text-tertiary font-mono flex items-center gap-2">
                       <span>{(doc.size_bytes / (1024 * 1024)).toFixed(1)} MB</span>
                       <span>·</span>
                       <span>{doc.page_count} pages</span>
@@ -255,7 +259,7 @@ export default function KnowledgePage() {
         {searchResults && (
           <div className="flex flex-col gap-3 pt-3 border-t border-border">
             {/* Latency timing breakdown */}
-            <div className="flex items-center justify-between text-[11px] font-mono text-text-tertiary bg-bg-base p-2 rounded border border-border">
+            <div className="flex items-center justify-between text-xs font-mono text-text-tertiary bg-bg-base p-2.5 rounded border border-border">
               <span>
                 Embed: <strong className="text-text-primary">{searchResults.timings.embed_ms}ms</strong> (CPU ONNX)
               </span>
@@ -276,14 +280,14 @@ export default function KnowledgePage() {
                 >
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
-                      <span className="font-mono font-bold text-accent px-1.5 py-0.2 rounded bg-accent/15 border border-accent/30 text-[11px]">
+                      <span className="font-mono font-bold text-accent px-1.5 py-0.5 rounded bg-accent/15 border border-accent/30 text-xs">
                         {chunk.marker}
                       </span>
                       <span className="font-mono text-text-primary font-medium text-xs">
                         {chunk.label}
                       </span>
                     </div>
-                    <span className="font-mono text-[11px] text-ok">
+                    <span className="font-mono text-xs text-ok">
                       Score: {(chunk.score * 100).toFixed(1)}%
                     </span>
                   </div>

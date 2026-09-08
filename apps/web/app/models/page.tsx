@@ -2,10 +2,11 @@
 
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { api } from '../../lib/api';
+import { api, useIsMock } from '../../lib/api';
 import { ModelRead, ModelProbeResult } from '../../lib/types';
 import { CapabilityChip } from '../../components/primitives/CapabilityChip';
 import { StatusDot } from '../../components/primitives/StatusDot';
+import { MockBadge } from '../../components/primitives/MockBadge';
 import { useShellStore } from '../../stores/shellStore';
 import {
   Cpu,
@@ -23,7 +24,10 @@ import {
 
 export default function ModelManagementPage() {
   const { setActiveModel, activeModelId } = useShellStore();
+  const isModelsMock = useIsMock('models');
   const [models, setModels] = useState<ModelRead[]>([]);
+  const [residency, setResidency] = useState<any>(null);
+  const [runtimes, setRuntimes] = useState<any[]>([]);
   const [activeTab, setActiveTab] = useState<'installed' | 'available' | 'deploy' | 'playground'>('installed');
   const [capabilityFilter, setCapabilityFilter] = useState<string>('all');
   const [loading, setLoading] = useState(true);
@@ -49,8 +53,14 @@ export default function ModelManagementPage() {
   const loadModels = async () => {
     setLoading(true);
     try {
-      const data = await api.getModels();
+      const [data, resData, runtimesData] = await Promise.all([
+        api.getModels(),
+        api.getModelResidency(),
+        api.getRuntimes(),
+      ]);
       setModels(data);
+      setResidency(resData);
+      setRuntimes(runtimesData);
     } catch (err) {
       console.error(err);
     } finally {
@@ -65,6 +75,25 @@ export default function ModelManagementPage() {
       await api.loadModel(model.id);
     }
     await loadModels();
+  };
+
+  const handleRefreshModel = async (id: string) => {
+    try {
+      await api.refreshModel(id);
+      await loadModels();
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleDeleteModel = async (id: string) => {
+    if (!confirm('Remove this model from local registry?')) return;
+    try {
+      await api.deleteModel(id);
+      await loadModels();
+    } catch (err) {
+      console.error(err);
+    }
   };
 
   const handleSelectModel = (model: ModelRead) => {
@@ -114,18 +143,21 @@ export default function ModelManagementPage() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-border pb-4">
         <div>
-          <h1 className="text-xl font-bold tracking-tight text-text-primary">
-            Model Management
-          </h1>
-          <p className="text-xs text-text-secondary">
-            Manage and deploy open-weight models on your infrastructure
+          <div className="flex items-center gap-3">
+            <h1 className="text-xl font-bold tracking-tight text-text-primary">
+              Model Management
+            </h1>
+            {isModelsMock && <MockBadge label="Mock Registry" size="sm" />}
+          </div>
+          <p className="text-sm text-text-secondary">
+            Manage, verify and deploy open-weight models on your sovereign hardware perimeters
           </p>
         </div>
 
         {/* Action button */}
         <button
           onClick={() => setActiveTab('deploy')}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-accent hover:bg-accent-hover text-white text-xs font-semibold shadow transition-all self-start sm:self-auto"
+          className="flex items-center gap-1.5 px-3.5 py-2 rounded-md bg-accent hover:bg-accent-hover text-white text-xs font-semibold font-mono shadow transition-all self-start sm:self-auto"
         >
           <Plus className="w-4 h-4" />
           <span>Deploy New Model</span>
@@ -133,7 +165,7 @@ export default function ModelManagementPage() {
       </div>
 
       {/* Tabs */}
-      <div className="flex items-center gap-6 border-b border-border text-xs font-medium">
+      <div className="flex items-center gap-6 border-b border-border text-sm font-medium">
         <button
           onClick={() => setActiveTab('installed')}
           className={`pb-2.5 transition-colors border-b-2 -mb-px ${
@@ -142,7 +174,7 @@ export default function ModelManagementPage() {
               : 'border-transparent text-text-secondary hover:text-text-primary'
           }`}
         >
-          Installed Models
+          Installed Models ({models.length})
         </button>
         <button
           onClick={() => setActiveTab('available')}
@@ -152,7 +184,7 @@ export default function ModelManagementPage() {
               : 'border-transparent text-text-secondary hover:text-text-primary'
           }`}
         >
-          Available Models
+          Runtime Adapters ({runtimes.length})
         </button>
         <button
           onClick={() => setActiveTab('deploy')}
@@ -178,66 +210,73 @@ export default function ModelManagementPage() {
 
       {/* VRAM Allocation Bar */}
       <div className="bg-bg-panel border border-border rounded-md p-4">
-        <div className="flex items-center justify-between text-xs mb-2">
+        <div className="flex items-center justify-between text-xs sm:text-sm mb-2">
           <div className="flex items-center gap-2">
             <HardDrive className="w-4 h-4 text-accent" />
             <span className="font-semibold text-text-primary">GPU VRAM Allocation Budget</span>
-            <span className="text-[11px] font-mono text-text-tertiary">(Single-Resident Laptop Profile)</span>
+            <span className="text-xs font-mono text-text-tertiary">(Single-Resident Laptop Profile)</span>
           </div>
           <span className="font-mono text-xs text-text-secondary">
-            <strong className="text-text-primary">5.2 GB</strong> used / 8.0 GB Physical VRAM
+            <strong className="text-text-primary">{residency ? (residency.used_vram_mb / 1024).toFixed(1) : '5.2'} GB</strong> used / {residency ? (residency.total_vram_mb / 1024).toFixed(1) : '8.0'} GB Physical VRAM
           </span>
         </div>
 
         {/* Stacked Bar */}
         <div className="w-full h-3 bg-bg-base rounded-full overflow-hidden flex border border-border">
-          <div className="h-full bg-accent" style={{ width: '65%' }} title="Llama 3.1 70B (Resident: 5.2 GB)" />
-          <div className="h-full bg-[#E0A32E]" style={{ width: '16%' }} title="OS & Display Compositor (1.3 GB)" />
-          <div className="h-full bg-[#232833]" style={{ width: '19%' }} title="Free Headroom (1.5 GB)" />
+          <div className="h-full bg-accent" style={{ width: '65%' }} title="Active Resident Model" />
+          <div className="h-full bg-[#E0A32E]" style={{ width: '16%' }} title="OS & Display Compositor" />
+          <div className="h-full bg-[#232833]" style={{ width: '19%' }} title="Free Headroom" />
         </div>
 
-        <div className="flex items-center justify-between text-[11px] font-mono text-text-tertiary mt-2">
+        <div className="flex items-center justify-between text-xs font-mono text-text-tertiary mt-2">
           <div className="flex items-center gap-4">
             <span className="flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-accent" /> Active Model (5.2 GB)
+              <span className="w-2 h-2 rounded-full bg-accent" /> Active Model ({residency ? (residency.used_vram_mb / 1024).toFixed(1) : '5.2'} GB)
             </span>
             <span className="flex items-center gap-1.5">
               <span className="w-2 h-2 rounded-full bg-[#E0A32E]" /> OS Reserved (1.3 GB)
             </span>
             <span className="flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-[#232833]" /> Usable Headroom (1.5 GB)
+              <span className="w-2 h-2 rounded-full bg-[#232833]" /> Available VRAM Headroom
             </span>
           </div>
-          <span className="text-ok">FastEmbed Vectors Offloaded to CPU (0 GB VRAM)</span>
         </div>
       </div>
 
       {/* Tab Content: Installed Models */}
       {activeTab === 'installed' && (
         <div className="flex flex-col gap-4">
-          {/* Capability Filters */}
-          <div className="flex items-center gap-2 overflow-x-auto pb-1">
-            <span className="text-xs text-text-tertiary font-mono mr-1">Filter:</span>
-            {['all', 'text', 'vision', 'coding', 'multimodal', 'reasoning'].map((cap) => (
-              <button
-                key={cap}
-                onClick={() => setCapabilityFilter(cap)}
-                className={`px-2.5 py-1 rounded text-xs font-mono capitalize transition-colors ${
-                  capabilityFilter === cap
-                    ? 'bg-accent text-white font-medium shadow-sm'
-                    : 'bg-bg-panel border border-border text-text-secondary hover:text-text-primary'
-                }`}
-              >
-                {cap}
-              </button>
-            ))}
+          {/* Filter Bar */}
+          <div className="flex items-center justify-between gap-4 flex-wrap text-xs font-mono">
+            <div className="flex items-center gap-2">
+              <span className="text-text-tertiary">Filter Capability:</span>
+              <div className="flex gap-1.5 flex-wrap">
+                {['all', 'reasoning', 'coding', 'vision'].map((cap) => (
+                  <button
+                    key={cap}
+                    onClick={() => setCapabilityFilter(cap)}
+                    className={`px-2.5 py-1 rounded text-xs font-mono capitalize transition-colors ${
+                      capabilityFilter === cap
+                        ? 'bg-accent text-white font-medium shadow-sm'
+                        : 'bg-bg-panel border border-border text-text-secondary hover:text-text-primary'
+                    }`}
+                  >
+                    {cap}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <span className="text-text-tertiary">
+              Showing {filteredModels.length} of {models.length} registered models
+            </span>
           </div>
 
-          {/* Cards Grid matching Reference Image 1 */}
+          {/* Model Cards List */}
           <div className="flex flex-col gap-3">
             {filteredModels.map((model) => {
-              const isRunning = model.health === 'healthy' || model.is_resident;
               const isSelected = activeModelId === model.id;
+              const isRunning = model.health === 'healthy' && model.is_resident;
 
               return (
                 <div
@@ -268,7 +307,7 @@ export default function ModelManagementPage() {
                   </div>
 
                   {/* Right: Status badge & Actions */}
-                  <div className="flex items-center gap-3 self-end sm:self-center flex-shrink-0">
+                  <div className="flex items-center gap-2 self-end sm:self-center flex-shrink-0">
                     <div className="px-2.5 py-1 rounded bg-bg-elevated border border-border">
                       <StatusDot status={isRunning ? 'running' : 'stopped'} pulse={isRunning} />
                     </div>
@@ -292,8 +331,20 @@ export default function ModelManagementPage() {
                       {isRunning ? <Square className="w-3.5 h-3.5 text-warn" /> : <Play className="w-3.5 h-3.5 text-ok" />}
                     </button>
 
-                    <button className="p-1.5 rounded text-text-tertiary hover:text-text-secondary">
-                      <MoreVertical className="w-4 h-4" />
+                    <button
+                      onClick={() => handleRefreshModel(model.id)}
+                      className="p-1.5 rounded text-text-tertiary hover:text-accent hover:bg-bg-elevated transition-colors border border-border"
+                      title="Re-probe capabilities"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" />
+                    </button>
+
+                    <button
+                      onClick={() => handleDeleteModel(model.id)}
+                      className="p-1.5 rounded text-text-tertiary hover:text-error hover:bg-bg-elevated transition-colors border border-border"
+                      title="Delete from registry"
+                    >
+                      <MoreVertical className="w-3.5 h-3.5" />
                     </button>
                   </div>
                 </div>
@@ -481,19 +532,19 @@ export default function ModelManagementPage() {
                 <div>
                   <div className="flex items-center justify-between mb-2">
                     <Cpu className="w-5 h-5 text-accent" />
-                    <span className="text-[10px] font-mono text-text-tertiary">{pm.author}</span>
+                    <span className="text-xs font-mono text-text-tertiary">{pm.author}</span>
                   </div>
-                  <h3 className="text-xs font-bold text-text-primary mb-1">{pm.name}</h3>
+                  <h3 className="text-sm font-bold text-text-primary mb-1">{pm.name}</h3>
                   <div className="flex flex-wrap gap-1 mb-3">
                     {pm.tags.map((t) => (
-                      <span key={t} className="text-[10px] font-mono px-1 py-0.2 rounded bg-bg-elevated border border-border text-text-secondary">
+                      <span key={t} className="text-xs font-mono px-1.5 py-0.5 rounded bg-bg-elevated border border-border text-text-secondary">
                         {t}
                       </span>
                     ))}
                   </div>
                 </div>
                 <button
-                  className={`w-full py-1 text-[11px] font-semibold rounded transition-colors ${
+                  className={`w-full py-1.5 text-xs font-semibold rounded transition-colors ${
                     selectedPlaygroundModel === pm.id
                       ? 'bg-accent text-white'
                       : 'bg-bg-elevated border border-border text-text-secondary hover:text-text-primary'
@@ -508,7 +559,7 @@ export default function ModelManagementPage() {
           {/* Model Response Comparison Box */}
           <div className="bg-bg-panel border border-border rounded-md p-4">
             <div className="flex items-center justify-between border-b border-border pb-3 mb-3">
-              <span className="text-xs font-semibold text-text-primary">
+              <span className="text-sm font-semibold text-text-primary">
                 Model Response Comparison
               </span>
               <div className="flex gap-2">
@@ -524,7 +575,7 @@ export default function ModelManagementPage() {
               </div>
             </div>
 
-            <div className="text-xs text-text-secondary whitespace-pre-line leading-relaxed mb-4 font-sans">
+            <div className="text-sm text-text-secondary whitespace-pre-line leading-relaxed mb-4 font-sans">
               Based on the provided maintenance document and sensor data, here are the key findings:
 
               1. The vibration levels are 23% higher than normal operating range.
@@ -535,7 +586,7 @@ export default function ModelManagementPage() {
                  • Review ASME Section VIII wall thickness logs.
             </div>
 
-            <div className="flex items-center justify-between text-[11px] font-mono text-text-tertiary border-t border-border pt-2">
+            <div className="flex items-center justify-between text-xs font-mono text-text-tertiary border-t border-border pt-2">
               <span>Tokens: 432 | Latency: 2.1s</span>
               <span className="text-ok">✓ Grounded against local corpus</span>
             </div>

@@ -6,6 +6,7 @@ import {
   MOCK_GRAPH_RELATIONSHIPS
 } from '../../../lib/mockData';
 import { GraphEntity } from '../../../lib/types';
+import { MockBadge } from '../../../components/primitives/MockBadge';
 import {
   Search,
   Plus,
@@ -49,9 +50,12 @@ export default function KnowledgeGraphPage() {
       <div className="bg-bg-panel border-b border-border p-4 flex flex-col gap-3 flex-shrink-0">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
-            <h1 className="text-lg font-bold tracking-tight text-text-primary">
-              Knowledge Graph
-            </h1>
+            <div className="flex items-center gap-2.5">
+              <h1 className="text-lg font-bold tracking-tight text-text-primary">
+                Knowledge Graph
+              </h1>
+              <MockBadge label="Mock Topology" size="sm" />
+            </div>
             <p className="text-xs text-text-secondary">
               Explore relationships across your documents, assets, processes and people
             </p>
@@ -291,8 +295,8 @@ export default function KnowledgeGraphPage() {
             </svg>
 
             {/* Right overlay: Legend matching Reference Image 2 */}
-            <div className="absolute top-4 right-4 bg-bg-panel/90 backdrop-blur-sm border border-border rounded-md p-3 text-[11px] font-mono flex flex-col gap-1.5 shadow-xl">
-              <span className="text-[10px] text-text-tertiary uppercase font-bold mb-1">
+            <div className="absolute top-4 right-4 bg-bg-panel/90 backdrop-blur-sm border border-border rounded-md p-3.5 text-xs font-mono flex flex-col gap-2 shadow-xl">
+              <span className="text-xs text-text-tertiary uppercase font-bold mb-0.5">
                 Entity Types
               </span>
               {legendTypes.map((t) => (
@@ -312,17 +316,17 @@ export default function KnowledgeGraphPage() {
                       className="w-3 h-3 rounded-full"
                       style={{ backgroundColor: selectedEntity.color }}
                     />
-                    <span className="text-xs font-bold text-text-primary">
+                    <span className="text-sm font-bold text-text-primary">
                       {selectedEntity.label}
                     </span>
                   </div>
-                  <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-bg-elevated border border-border text-accent">
+                  <span className="text-xs font-mono px-2 py-0.5 rounded bg-bg-elevated border border-border text-accent">
                     {selectedEntity.type}
                   </span>
                 </div>
 
                 {selectedEntity.details && (
-                  <div className="flex flex-col gap-1 text-[11px] font-mono text-text-secondary">
+                  <div className="flex flex-col gap-1 text-xs font-mono text-text-secondary">
                     {Object.entries(selectedEntity.details).map(([k, v]) => (
                       <div key={k} className="flex justify-between">
                         <span className="text-text-tertiary">{k}:</span>

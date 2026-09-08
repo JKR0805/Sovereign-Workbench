@@ -47,7 +47,7 @@ export const StatusDot: React.FC<StatusDotProps> = ({ status, pulse = false, siz
   const dotSize = size === 'sm' ? 'w-1.5 h-1.5' : 'w-2 h-2';
 
   return (
-    <span className="inline-flex items-center gap-1.5 font-mono text-[11px] text-text-secondary">
+    <span className="inline-flex items-center gap-1.5 font-mono text-xs text-text-secondary">
       <span className="relative flex h-2 w-2 items-center justify-center">
         {pulse && (
           <span

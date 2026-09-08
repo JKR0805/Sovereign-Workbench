@@ -26,12 +26,12 @@ export const CapabilityChip: React.FC<CapabilityChipProps> = ({ label, score, si
   return (
     <span
       className={`inline-flex items-center gap-1.5 rounded border font-mono tracking-tight transition-colors ${
-        size === 'sm' ? 'px-1.5 py-0.5 text-[11px]' : 'px-2 py-0.5 text-xs'
+        size === 'sm' ? 'px-2 py-0.5 text-xs' : 'px-2.5 py-1 text-sm'
       } ${colorClass}`}
     >
       <span className="capitalize">{label}</span>
       {score !== undefined && (
-        <span className="opacity-75 font-semibold text-[10px]">
+        <span className="opacity-80 font-semibold text-xs">
           {(score * 100).toFixed(0)}%
         </span>
       )}

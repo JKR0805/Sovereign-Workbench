@@ -56,10 +56,10 @@ export const HexLogo: React.FC<HexLogoProps> = ({ size = 32, className = '', wit
 
       {withText && (
         <div className="flex flex-col">
-          <span className="text-[15px] font-semibold tracking-tight text-text-primary whitespace-nowrap">
+          <span className="text-base font-semibold tracking-tight text-text-primary whitespace-nowrap">
             Sovereign AI Workbench
           </span>
-          <span className="text-[10px] text-text-tertiary tracking-wider font-mono uppercase">
+          <span className="text-xs text-text-tertiary tracking-wider font-mono uppercase">
             Built for Bharat · Airgap
           </span>
         </div>

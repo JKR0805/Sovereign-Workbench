@@ -26,7 +26,7 @@ export const MonoValue: React.FC<MonoValueProps> = ({ children, className = '', 
     >
       {children}
       {copyable && (
-        <span className="text-[10px] text-text-tertiary">
+        <span className="text-xs text-text-tertiary">
           {copied ? '✓' : '⧉'}
         </span>
       )}

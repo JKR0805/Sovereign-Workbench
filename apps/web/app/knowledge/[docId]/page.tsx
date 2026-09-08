@@ -28,17 +28,20 @@ export default function DocumentInsightsPage() {
   const [highlightedChunkId, setHighlightedChunkId] = useState<string | null>('chunk-rs-1');
 
   useEffect(() => {
-    loadChunks();
+    let active = true;
+    const fetchDocChunks = async () => {
+      try {
+        const data = await api.getDocumentChunks(docId);
+        if (active) setChunks(data);
+      } catch (err) {
+        console.error(err);
+      }
+    };
+    fetchDocChunks();
+    return () => {
+      active = false;
+    };
   }, [docId]);
-
-  const loadChunks = async () => {
-    try {
-      const data = await api.getDocumentChunks(docId);
-      setChunks(data);
-    } catch (err) {
-      console.error(err);
-    }
-  };
 
   const docTitle = docId.includes('safety')
     ? 'Refinery_Safety_Manual.pdf'
@@ -120,7 +123,7 @@ export default function DocumentInsightsPage() {
               Following automatic isolation, the safety crew must verify nitrogen purge activation on the top vapor condenser tray. Catwalk areas above elevation 24m must be cleared within 2 minutes.
             </p>
 
-            <div className="mt-8 pt-4 border-t border-border flex justify-between text-[11px] font-mono text-text-tertiary">
+            <div className="mt-8 pt-4 border-t border-border flex justify-between text-xs font-mono text-text-tertiary">
               <span>Standard: OISD-156</span>
               <span>Page 12 / 48</span>
             </div>
@@ -170,7 +173,7 @@ export default function DocumentInsightsPage() {
 
                 {/* Chunks List */}
                 <div className="border-t border-border pt-3">
-                  <span className="font-semibold text-text-primary block mb-2 font-mono text-[11px] uppercase">
+                  <span className="font-semibold text-text-primary block mb-2 font-mono text-xs uppercase">
                     Extracted Vector Chunks ({chunks.length})
                   </span>
                   <div className="flex flex-col gap-2">
@@ -178,7 +181,7 @@ export default function DocumentInsightsPage() {
                       <div
                         key={chk.id}
                         onMouseEnter={() => setHighlightedChunkId(chk.id)}
-                        className={`p-2.5 rounded border text-[11px] font-mono cursor-pointer transition-colors ${
+                        className={`p-2.5 rounded border text-xs font-mono cursor-pointer transition-colors ${
                           highlightedChunkId === chk.id
                             ? 'bg-accent/10 border-accent text-accent'
                             : 'bg-bg-elevated border-border text-text-secondary hover:border-border-strong'

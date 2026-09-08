@@ -177,7 +177,7 @@ export default function LoginPage() {
               <span>Supports Multiple Open Models</span>
             </div>
           </div>
-          <div className="text-[11px] font-mono text-text-tertiary">
+          <div className="text-xs font-mono text-text-tertiary">
             Powering a Self-Reliant Tomorrow
           </div>
         </div>

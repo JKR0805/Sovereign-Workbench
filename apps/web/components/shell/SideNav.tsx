@@ -51,8 +51,8 @@ export const SideNav: React.FC = () => {
 
   return (
     <aside
-      className={`h-[calc(100vh-3.5rem-1.75rem)] bg-bg-panel border-r border-border flex flex-col justify-between transition-all duration-200 z-20 flex-shrink-0 ${
-        sidebarCollapsed ? 'w-16' : 'w-56'
+      className={`h-[calc(100vh-3.5rem-2rem)] bg-bg-panel border-r border-border flex flex-col justify-between transition-all duration-200 z-20 flex-shrink-0 ${
+        sidebarCollapsed ? 'w-16' : 'w-60'
       }`}
     >
       {/* Top: New Chat button & Nav links */}
@@ -60,7 +60,7 @@ export const SideNav: React.FC = () => {
         {/* Collapse toggle header */}
         <div className="flex items-center justify-between px-1 mb-1">
           {!sidebarCollapsed && (
-            <span className="text-[11px] font-mono text-text-tertiary uppercase tracking-wider">
+            <span className="text-xs font-mono text-text-tertiary uppercase tracking-wider">
               Workspace
             </span>
           )}
@@ -79,7 +79,7 @@ export const SideNav: React.FC = () => {
           className={`flex items-center justify-center gap-2 rounded-lg font-medium text-white transition-all shadow-md active:scale-95 ${
             sidebarCollapsed
               ? 'w-10 h-10 mx-auto bg-gradient-to-r from-blue-600 to-indigo-600'
-              : 'w-full py-2.5 px-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-xs'
+              : 'w-full py-2.5 px-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-sm font-semibold'
           }`}
           title="New Chat"
         >
@@ -88,7 +88,7 @@ export const SideNav: React.FC = () => {
         </button>
 
         {/* Nav Links */}
-        <nav className="flex flex-col gap-0.5 mt-2">
+        <nav className="flex flex-col gap-1 mt-2">
           {navItems.map((item) => {
             const Icon = item.icon;
             const isActive = pathname === item.href || (item.href !== '/' && pathname.startsWith(item.href));
@@ -97,7 +97,7 @@ export const SideNav: React.FC = () => {
               <Link
                 key={item.href}
                 href={item.href}
-                className={`flex items-center gap-3 px-2.5 py-2 rounded-md text-xs transition-colors group ${
+                className={`flex items-center gap-3 px-2.5 py-2 rounded-md text-sm transition-colors group ${
                   isActive
                     ? 'bg-accent/15 text-accent font-medium border border-accent/20'
                     : 'text-text-secondary hover:text-text-primary hover:bg-bg-elevated border border-transparent'
@@ -115,10 +115,10 @@ export const SideNav: React.FC = () => {
       </div>
 
       {/* Bottom links: Settings, Help, Sign Out */}
-      <div className="p-2 border-t border-border flex flex-col gap-0.5">
+      <div className="p-2.5 border-t border-border flex flex-col gap-1">
         <Link
           href="/settings"
-          className={`flex items-center gap-3 px-2.5 py-2 rounded-md text-xs transition-colors ${
+          className={`flex items-center gap-3 px-2.5 py-2 rounded-md text-sm transition-colors ${
             pathname === '/settings'
               ? 'bg-accent/15 text-accent font-medium'
               : 'text-text-secondary hover:text-text-primary hover:bg-bg-elevated'
@@ -131,7 +131,7 @@ export const SideNav: React.FC = () => {
 
         <button
           onClick={() => alert('VAJRA Sovereign AI Workbench v0.1.0\nOperating in 100% On-Premise Airgapped Mode.\nNo external data egress allowed.')}
-          className="flex items-center gap-3 px-2.5 py-2 rounded-md text-xs text-text-secondary hover:text-text-primary hover:bg-bg-elevated transition-colors text-left"
+          className="flex items-center gap-3 px-2.5 py-2 rounded-md text-sm text-text-secondary hover:text-text-primary hover:bg-bg-elevated transition-colors text-left"
           title={sidebarCollapsed ? 'Help' : undefined}
         >
           <HelpCircle className="w-4 h-4 flex-shrink-0 text-text-tertiary" />
@@ -140,7 +140,7 @@ export const SideNav: React.FC = () => {
 
         <Link
           href="/login"
-          className="flex items-center gap-3 px-2.5 py-2 rounded-md text-xs text-error/80 hover:text-error hover:bg-error/10 transition-colors"
+          className="flex items-center gap-3 px-2.5 py-2 rounded-md text-sm text-error/80 hover:text-error hover:bg-error/10 transition-colors"
           title={sidebarCollapsed ? 'Sign Out' : undefined}
         >
           <LogOut className="w-4 h-4 flex-shrink-0" />

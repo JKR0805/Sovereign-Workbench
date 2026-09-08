@@ -449,3 +449,25 @@ export interface WorkflowEdge {
   target: string;
   label?: string;
 }
+
+export interface SelfAuditResult {
+  passed: boolean;
+  cloud_api_keys_found: number;
+  endpoints_loopback: boolean;
+  qdrant_cloud_disabled: boolean;
+  details: string[];
+}
+
+export interface NetworkRulesetResponse {
+  available: boolean;
+  ruleset?: string;
+  reason?: string;
+}
+
+export interface ToolTestResult {
+  tool: string;
+  success: boolean;
+  output: any;
+  duration_ms: number;
+  error?: string | null;
+}

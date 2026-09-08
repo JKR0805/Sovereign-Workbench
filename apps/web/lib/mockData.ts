@@ -819,3 +819,140 @@ export const MOCK_SAMPLE_PROMPTS = [
     docInfo: "High-res schematic"
   }
 ];
+
+export const MOCK_RUNTIMES = [
+  {
+    id: "ollama-local",
+    name: "Ollama Local Daemon",
+    type: "ollama" as const,
+    endpoint: "http://127.0.0.1:11434",
+    is_local: true,
+    status: "healthy" as const,
+    version: "0.3.12",
+    available_models_count: 5
+  },
+  {
+    id: "vllm-local",
+    name: "vLLM Inference Engine",
+    type: "vllm" as const,
+    endpoint: "http://127.0.0.1:8001",
+    is_local: true,
+    status: "healthy" as const,
+    version: "0.6.2",
+    available_models_count: 2
+  },
+  {
+    id: "fastembed-onnx",
+    name: "FastEmbed ONNX CPU Runtime",
+    type: "fastembed" as const,
+    endpoint: "local://onnxruntime",
+    is_local: true,
+    status: "healthy" as const,
+    version: "1.18.0",
+    available_models_count: 1
+  }
+];
+
+export const MOCK_RESIDENCY = {
+  ts: new Date().toISOString(),
+  total_vram_mb: 8192.0,
+  used_vram_mb: 5240.0,
+  resident_models: [
+    {
+      model_id: "general-reasoning",
+      runtime_id: "ollama-local",
+      runtime_model_id: "qwen3:8b",
+      vram_bytes: 5494538240,
+      expires_at: new Date(Date.now() + 1800000).toISOString()
+    }
+  ]
+};
+
+export const MOCK_ROUTING_POLICIES = [
+  {
+    id: "default-institutional",
+    name: "Default Institutional Sovereign Policy",
+    description: "Multi-factor routing prioritizing verified residency and strict modal suitability.",
+    active: true,
+    rules: [
+      {
+        condition: "modalities_in contains image",
+        target_model_or_capability: "vision",
+        priority_offset: 20
+      },
+      {
+        condition: "tokens_estimated > 16384",
+        target_model_or_capability: "context_window_high",
+        priority_offset: 15
+      }
+    ],
+    weights: {
+      capability: 0.40,
+      preferred: 0.15,
+      context: 0.10,
+      latency: 0.10,
+      priority: 0.10,
+      residency: 0.10,
+      reliability: 0.05
+    },
+    updated_at: "2026-09-07T17:00:00.000Z"
+  }
+];
+
+export const MOCK_RULESET = `table inet vajra {
+  chain output {
+    type filter hook output priority 0; policy accept;
+    ip daddr { 127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16 } accept
+    meta skuid vajra log prefix "VAJRA-EGRESS-BLOCK " level warn counter drop
+  }
+}`;
+
+export const MOCK_SELF_AUDIT = {
+  passed: true,
+  cloud_api_keys_found: 0,
+  endpoints_loopback: true,
+  qdrant_cloud_disabled: true,
+  details: [
+    "Zero cloud vendor API keys found in runtime environment (OPENAI, ANTHROPIC, GEMINI = None)",
+    "All registered runtime endpoints bind strictly to loopback 127.0.0.1",
+    "Qdrant vector engine operating in local embedded SQLite/mmap mode without telemetry"
+  ]
+};
+
+export const MOCK_SANDBOX_POLICY = {
+  docker_connected: true,
+  image: "vajra-sandbox:py311",
+  network_disabled: true,
+  memory_limit_mb: 1024,
+  cpu_quota_cores: 2,
+  read_only_rootfs: true,
+  drop_capabilities: ["NET_ADMIN", "NET_RAW", "SYS_ADMIN", "CAP_SYS_PTRACE"]
+};
+
+export const MOCK_AUDIT_EVENT_TYPES = [
+  "RUN_CREATED",
+  "NODE_ENTERED",
+  "NODE_COMPLETED",
+  "NODE_FAILED",
+  "DOCUMENT_INGESTED",
+  "PAGE_CLASSIFIED",
+  "TASK_CLASSIFIED",
+  "MODEL_CANDIDATES",
+  "MODEL_SELECTED",
+  "MODEL_LOADING",
+  "MODEL_READY",
+  "LLM_TOKEN",
+  "RAG_QUERY",
+  "RAG_RESULTS",
+  "TOOL_CALLED",
+  "TOOL_RESULT",
+  "SANDBOX_STARTED",
+  "SANDBOX_COMPLETED",
+  "VERIFICATION_PASSED",
+  "FILE_CREATED",
+  "RUN_COMPLETED",
+  "RUN_FAILED",
+  "RUN_CANCELLED",
+  "EGRESS_ATTEMPT",
+  "EGRESS_BLOCKED"
+];

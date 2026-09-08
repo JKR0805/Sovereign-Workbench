@@ -1,8 +1,9 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { api } from '../../lib/api';
+import { api, useIsMock } from '../../lib/api';
 import { AuditRecord } from '../../lib/types';
+import { MockBadge } from '../../components/primitives/MockBadge';
 import {
   FileCheck2,
   Search,
@@ -15,24 +16,43 @@ import {
 } from 'lucide-react';
 
 export default function AuditExplorerPage() {
+  const isAuditMock = useIsMock('audit');
   const [logs, setLogs] = useState<AuditRecord[]>([]);
+  const [eventTypes, setEventTypes] = useState<string[]>([]);
   const [selectedRecord, setSelectedRecord] = useState<AuditRecord | null>(null);
   const [filterType, setFilterType] = useState('ALL');
   const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
 
   useEffect(() => {
-    loadLogs();
+    loadData();
   }, []);
 
-  const loadLogs = async () => {
+  const loadData = async () => {
     setLoading(true);
     try {
-      const data = await api.getAuditLogs();
-      setLogs(data);
+      const [logsData, typesData] = await Promise.all([
+        api.getAuditLogs(),
+        api.getAuditEventTypes(),
+      ]);
+      setLogs(logsData);
+      setEventTypes(typesData);
     } catch (err) {
       console.error(err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      const res = await api.exportAuditManifest();
+      alert(`Exported signed manifest: ${res.filename} (${(res.size_bytes / 1024).toFixed(1)} KB)`);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setExporting(false);
     }
   };
 
@@ -46,20 +66,24 @@ export default function AuditExplorerPage() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-border pb-4">
         <div>
-          <h1 className="text-xl font-bold tracking-tight text-text-primary">
-            Audit Explorer
-          </h1>
-          <p className="text-xs text-text-secondary">
+          <div className="flex items-center gap-3">
+            <h1 className="text-xl font-bold tracking-tight text-text-primary">
+              Audit Explorer
+            </h1>
+            {isAuditMock && <MockBadge label="Mock Event Log" size="sm" />}
+          </div>
+          <p className="text-sm text-text-secondary">
             Tamper-evident append-only event store with monotonic sequence IDs and verifiable telemetry
           </p>
         </div>
 
         <button
-          onClick={() => alert('Exporting full Ed25519-signed institutional audit manifest bundle...')}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-bg-panel border border-border hover:border-accent text-xs font-mono text-text-primary hover:text-accent transition-colors self-start sm:self-auto"
+          onClick={handleExport}
+          disabled={exporting}
+          className="flex items-center gap-2 px-3.5 py-2 rounded-md bg-bg-panel border border-border hover:border-accent text-xs font-mono text-text-primary hover:text-accent transition-colors self-start sm:self-auto font-medium"
         >
-          <Download className="w-3.5 h-3.5" />
-          <span>Export Manifest (.zip)</span>
+          <Download className="w-4 h-4" />
+          <span>{exporting ? 'Generating Bundle...' : 'Export Manifest (.zip)'}</span>
         </button>
       </div>
 
@@ -71,20 +95,19 @@ export default function AuditExplorerPage() {
           onChange={(e) => setFilterType(e.target.value)}
           className="bg-bg-panel border border-border rounded-md px-3 py-1.5 text-xs text-text-secondary font-mono focus:border-accent outline-none"
         >
-          <option value="ALL">All Event Types</option>
-          <option value="EGRESS_BLOCKED">EGRESS_BLOCKED</option>
-          <option value="MODEL_SELECTED">MODEL_SELECTED</option>
-          <option value="FILE_CREATED">FILE_CREATED</option>
-          <option value="VERIFICATION_PASSED">VERIFICATION_PASSED</option>
+          <option value="ALL">All Event Types ({(eventTypes.length || 25)})</option>
+          {eventTypes.map((t) => (
+            <option key={t} value={t}>{t}</option>
+          ))}
         </select>
       </div>
 
-      {/* Sequential Event Table matching FRONTEND_SPECIFICATION.md Section 4.10 */}
+      {/* Sequential Event Table */}
       <div className="bg-bg-panel border border-border rounded-md overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs font-mono">
+          <table className="w-full text-left text-xs sm:text-sm font-mono">
             <thead>
-              <tr className="border-b border-border text-text-tertiary text-[10px] bg-bg-elevated/40">
+              <tr className="border-b border-border text-text-tertiary text-xs bg-bg-elevated/40">
                 <th className="p-3">Seq #</th>
                 <th className="p-3">Timestamp</th>
                 <th className="p-3">Stream / Run ID</th>
@@ -112,7 +135,7 @@ export default function AuditExplorerPage() {
                     <td className="p-3 text-text-secondary">{r.ts}</td>
                     <td className="p-3 text-text-secondary truncate max-w-xs">{r.stream}</td>
                     <td className="p-3">
-                      <span className={`px-2 py-0.5 rounded border text-[10px] font-bold ${badgeColor}`}>
+                      <span className={`px-2 py-0.5 rounded border text-xs font-bold ${badgeColor}`}>
                         {r.type}
                       </span>
                     </td>
@@ -148,11 +171,11 @@ export default function AuditExplorerPage() {
               </button>
             </div>
 
-            <div className="text-[11px] text-text-secondary">
+            <div className="text-xs text-text-secondary">
               Stream: <strong className="text-text-primary">{selectedRecord.stream}</strong> · Timestamp: {selectedRecord.ts}
             </div>
 
-            <div className="bg-bg-base border border-border rounded p-3 text-[11px] text-text-primary overflow-x-auto max-h-72">
+            <div className="bg-bg-base border border-border rounded p-3 text-xs text-text-primary overflow-x-auto max-h-72">
               <pre>{JSON.stringify(selectedRecord.payload, null, 2)}</pre>
             </div>
 

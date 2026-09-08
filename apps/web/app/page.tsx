@@ -1,10 +1,11 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { HexLogo } from '../components/primitives/HexLogo';
+import { MockBadge } from '../components/primitives/MockBadge';
 import { useShellStore } from '../stores/shellStore';
-import { api } from '../lib/api';
+import { api, useIsMock } from '../lib/api';
 import { MOCK_SAMPLE_PROMPTS } from '../lib/mockData';
 import {
   MessageSquare,
@@ -18,8 +19,21 @@ import {
   Sparkles,
   CheckCircle2,
   Copy,
-  RotateCcw
+  RotateCcw,
+  X,
+  FileSpreadsheet,
+  FileCode,
+  ChevronDown
 } from 'lucide-react';
+import { InferenceGraph } from '../components/inference/InferenceGraph';
+
+interface AttachedFileItem {
+  name: string;
+  info: string;
+  sizeBytes?: number;
+  isMockSample?: boolean;
+  file?: File;
+}
 
 interface ChatMessage {
   role: 'user' | 'assistant';
@@ -27,18 +41,27 @@ interface ChatMessage {
   sources?: string[];
   tokens?: number;
   latency?: string;
+  modelUsed?: string;
+  attachedFile?: AttachedFileItem;
+  isMock?: boolean;
 }
 
 export default function WorkbenchPage() {
   const router = useRouter();
-  const { activeModelName, activeModelId } = useShellStore();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const isGlobalMock = useIsMock('global');
+
+  const { activeModelName, activeModelId, setActiveModel } = useShellStore();
   const [prompt, setPrompt] = useState('');
   const [provisionalDecision, setProvisionalDecision] = useState<any>(null);
   const [isSimulating, setIsSimulating] = useState(false);
-  const [attachedFile, setAttachedFile] = useState<{ name: string; info: string } | null>(null);
+  const [attachedFile, setAttachedFile] = useState<AttachedFileItem | null>(null);
+  const [showAttachMenu, setShowAttachMenu] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
   const [localSearchEnabled, setLocalSearchEnabled] = useState(true);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isResponding, setIsResponding] = useState(false);
+  const [pendingPrompt, setPendingPrompt] = useState<string | null>(null);
 
   // Debounced provisional routing evaluation
   useEffect(() => {
@@ -56,8 +79,12 @@ export default function WorkbenchPage() {
             ? [
                 {
                   filename: attachedFile.name,
-                  mime: attachedFile.name.endsWith('.pdf') ? 'application/pdf' : 'text/markdown',
-                  size_bytes: 1048576,
+                  mime: attachedFile.name.endsWith('.pdf')
+                    ? 'application/pdf'
+                    : attachedFile.name.endsWith('.csv')
+                    ? 'text/csv'
+                    : 'text/markdown',
+                  size_bytes: attachedFile.sizeBytes || 1048576,
                   scanned_page_count: attachedFile.name.includes('scan') ? 1 : 0,
                 },
               ]
@@ -74,66 +101,88 @@ export default function WorkbenchPage() {
     return () => clearTimeout(timer);
   }, [prompt, attachedFile]);
 
+  const handleRealFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const sizeMb = file.size / (1024 * 1024);
+    const sizeStr = sizeMb >= 1 ? `${sizeMb.toFixed(1)} MB` : `${(file.size / 1024).toFixed(0)} KB`;
+
+    setAttachedFile({
+      name: file.name,
+      info: `${sizeStr} · Real File`,
+      sizeBytes: file.size,
+      isMockSample: false,
+      file,
+    });
+    setShowAttachMenu(false);
+    // Reset file input value so re-selecting same file triggers change
+    e.target.value = '';
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    const file = e.dataTransfer.files?.[0];
+    if (!file) return;
+    const sizeMb = file.size / (1024 * 1024);
+    const sizeStr = sizeMb >= 1 ? `${sizeMb.toFixed(1)} MB` : `${(file.size / 1024).toFixed(0)} KB`;
+
+    setAttachedFile({
+      name: file.name,
+      info: `${sizeStr} · Real File`,
+      sizeBytes: file.size,
+      isMockSample: false,
+      file,
+    });
+  };
+
   const handleSend = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!prompt.trim() && !attachedFile) return;
 
-    const userText = prompt.trim() || `Analyze ${attachedFile?.name}`;
-    const newMsg: ChatMessage = { role: 'user', content: userText };
+    const userText = prompt.trim() || `Analyze document: ${attachedFile?.name}`;
+    const newMsg: ChatMessage = {
+      role: 'user',
+      content: userText,
+      attachedFile: attachedFile || undefined,
+    };
     setMessages((prev) => [...prev, newMsg]);
+    setPendingPrompt(userText);
     setPrompt('');
     setIsResponding(true);
+  };
 
-    // Simulate grounded agent response
-    setTimeout(() => {
-      let reply = '';
-      let sources: string[] = [];
-
-      if (userText.toLowerCase().includes('wall thickness') || userText.toLowerCase().includes('e102')) {
-        reply = `Based on the refinery inspection manual and e102_report.md:
-
-1. Measured Wall Thickness:
-   • Measured: 6.8 mm across all tube passes.
-   • ASME Section VIII retirement threshold: 5.0 mm minimum.
-   • Safety Margin: +1.8 mm (+36% above minimum allowable threshold).
-
-2. Protocol Determination:
-   • The equipment complies with active operational integrity requirements.
-   • Recommend routine non-destructive examination scheduled in 12 months.`;
-        sources = ['Refinery_Safety_Manual.pdf (p.12)', 'Safety_Protocol_2024.pdf (p.8)'];
-      } else if (userText.toLowerCase().includes('temperature') || userText.toLowerCase().includes('350')) {
-        reply = `Based on the refinery safety manual, if the distillation column temperature exceeds 350°C, you should:
-
-1. Immediately activate the Emergency Shutdown System (ESD).
-2. Isolate the distillation column within 30 seconds.
-3. Cut feed supply to pre-heaters and furnaces.
-4. Notify the control room and safety emergency response team.
-5. Follow the incident reporting protocol (Section 7.3).`;
-        sources = ['Refinery_Safety_Manual.pdf (p.12)', 'Safety_Protocol_2024.pdf (p.8)'];
-      } else {
-        reply = `Task processed locally on sovereign infrastructure using ${activeModelName}.
-
-All context, vector embeddings, and generation were computed within your airgapped network boundary with zero external egress. Source citations and telemetry were verified against local SQLite & Qdrant indices.`;
-        sources = ['Local Knowledge Base'];
-      }
-
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: 'assistant',
-          content: reply,
-          sources,
-          tokens: 432,
-          latency: '1.8s',
-        },
-      ]);
-      setIsResponding(false);
-    }, 900);
+  const handleInferenceComplete = (result: {
+    selectedModel: string;
+    modelScore: number;
+    intent: string;
+    toolUsed: string;
+    citations: string[];
+    replyText: string;
+  }) => {
+    setMessages((prev) => [
+      ...prev,
+      {
+        role: 'assistant',
+        content: result.replyText,
+        sources: result.citations,
+        tokens: 432,
+        latency: '2.4s',
+        modelUsed: result.selectedModel,
+        isMock: isGlobalMock || true,
+      },
+    ]);
+    setIsResponding(false);
+    setPendingPrompt(null);
   };
 
   const handleSelectStarter = (sample: (typeof MOCK_SAMPLE_PROMPTS)[0]) => {
     setPrompt(sample.prompt);
-    setAttachedFile({ name: sample.docName, info: sample.docInfo });
+    setAttachedFile({
+      name: sample.docName,
+      info: `${sample.docInfo} · Sample Mock`,
+      isMockSample: true,
+    });
   };
 
   const handleActionCard = (type: string) => {
@@ -156,231 +205,411 @@ All context, vector embeddings, and generation were computed within your airgapp
     }
   };
 
+  const getFileIcon = (filename: string) => {
+    const ext = filename.split('.').pop()?.toLowerCase();
+    if (ext === 'csv' || ext === 'xlsx') return <FileSpreadsheet className="w-4 h-4 text-[#4DD4AC]" />;
+    if (ext === 'png' || ext === 'jpg' || ext === 'jpeg') return <ImageIcon className="w-4 h-4 text-[#A78BFA]" />;
+    if (ext === 'py' || ext === 'json' || ext === 'yaml') return <FileCode className="w-4 h-4 text-[#E0A32E]" />;
+    return <FileText className="w-4 h-4 text-accent" />;
+  };
+
   return (
-    <div className="min-h-full flex flex-col justify-between p-4 sm:p-6 max-w-5xl mx-auto">
-      {/* If no conversation yet: Hero Screen matching Reference Image 1 */}
-      {messages.length === 0 ? (
-        <div className="flex-1 flex flex-col items-center justify-center text-center my-auto py-6">
-          {/* Hexagon Logo */}
-          <div className="mb-4">
-            <HexLogo size={56} />
-          </div>
+    <div
+      onDragOver={(e) => {
+        e.preventDefault();
+        setIsDragging(true);
+      }}
+      onDragLeave={() => setIsDragging(false)}
+      onDrop={handleDrop}
+      className="flex flex-col h-[calc(100vh-3.5rem-1.75rem)] overflow-hidden bg-bg-base relative"
+    >
+      {/* Hidden File Input for Real Uploads */}
+      <input
+        type="file"
+        ref={fileInputRef}
+        onChange={handleRealFileSelect}
+        className="hidden"
+        accept=".pdf,.docx,.txt,.csv,.xlsx,.json,.md,.png,.jpg"
+      />
 
-          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-text-primary mb-1">
-            Good evening, Admin
-          </h1>
-          <p className="text-sm text-text-secondary mb-8">
-            How can I help you today?
-          </p>
-
-          {/* 5 Quick Action Cards matching Reference Image 1 */}
-          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 w-full max-w-4xl mb-10">
-            <button
-              onClick={() => handleActionCard('chat')}
-              className="flex flex-col items-center text-center p-4 rounded-md bg-bg-panel border border-border hover:border-accent transition-all group hover:-translate-y-0.5"
-            >
-              <div className="w-9 h-9 rounded-lg bg-bg-elevated border border-border flex items-center justify-center mb-2.5 text-accent group-hover:scale-110 transition-transform">
-                <MessageSquare className="w-5 h-5" />
-              </div>
-              <h2 className="text-xs font-semibold text-text-primary mb-1">Chat</h2>
-              <p className="text-[11px] text-text-tertiary leading-snug">
-                Get answers, generate content, and solve problems
-              </p>
-            </button>
-
-            <button
-              onClick={() => handleActionCard('docs')}
-              className="flex flex-col items-center text-center p-4 rounded-md bg-bg-panel border border-border hover:border-accent transition-all group hover:-translate-y-0.5"
-            >
-              <div className="w-9 h-9 rounded-lg bg-bg-elevated border border-border flex items-center justify-center mb-2.5 text-ok group-hover:scale-110 transition-transform">
-                <FileText className="w-5 h-5" />
-              </div>
-              <h2 className="text-xs font-semibold text-text-primary mb-1">Analyze Documents</h2>
-              <p className="text-[11px] text-text-tertiary leading-snug">
-                Upload and analyze PDFs, reports, and more
-              </p>
-            </button>
-
-            <button
-              onClick={() => handleActionCard('images')}
-              className="flex flex-col items-center text-center p-4 rounded-md bg-bg-panel border border-border hover:border-accent transition-all group hover:-translate-y-0.5"
-            >
-              <div className="w-9 h-9 rounded-lg bg-bg-elevated border border-border flex items-center justify-center mb-2.5 text-modality-vision group-hover:scale-110 transition-transform">
-                <ImageIcon className="w-5 h-5" />
-              </div>
-              <h2 className="text-xs font-semibold text-text-primary mb-1">Analyze Images</h2>
-              <p className="text-[11px] text-text-tertiary leading-snug">
-                Understand diagrams, charts, and photos
-              </p>
-            </button>
-
-            <button
-              onClick={() => handleActionCard('data')}
-              className="flex flex-col items-center text-center p-4 rounded-md bg-bg-panel border border-border hover:border-accent transition-all group hover:-translate-y-0.5"
-            >
-              <div className="w-9 h-9 rounded-lg bg-bg-elevated border border-border flex items-center justify-center mb-2.5 text-modality-coding group-hover:scale-110 transition-transform">
-                <BarChart3 className="w-5 h-5" />
-              </div>
-              <h2 className="text-xs font-semibold text-text-primary mb-1">Data Analysis</h2>
-              <p className="text-[11px] text-text-tertiary leading-snug">
-                Work with structured data and generate insights
-              </p>
-            </button>
-
-            <button
-              onClick={() => handleActionCard('tools')}
-              className="col-span-2 sm:col-span-1 flex flex-col items-center text-center p-4 rounded-md bg-bg-panel border border-border hover:border-accent transition-all group hover:-translate-y-0.5"
-            >
-              <div className="w-9 h-9 rounded-lg bg-bg-elevated border border-border flex items-center justify-center mb-2.5 text-warn group-hover:scale-110 transition-transform">
-                <Wrench className="w-5 h-5" />
-              </div>
-              <h2 className="text-xs font-semibold text-text-primary mb-1">Use Tools</h2>
-              <p className="text-[11px] text-text-tertiary leading-snug">
-                Access specialized tools and agents
-              </p>
-            </button>
-          </div>
-
-          {/* Starter Sample Cards matching FRONTEND_SPECIFICATION.md Section 4.1 */}
-          <div className="w-full max-w-2xl mb-8 text-left">
-            <div className="text-[11px] font-mono text-text-tertiary uppercase tracking-wider mb-2">
-              Sample Tasks & Preloaded Corpus
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-              {MOCK_SAMPLE_PROMPTS.map((sample, i) => (
-                <button
-                  key={i}
-                  onClick={() => handleSelectStarter(sample)}
-                  className="p-3 rounded bg-bg-panel border border-border hover:border-accent text-left transition-all group"
-                >
-                  <div className="text-xs font-medium text-text-primary mb-1.5 group-hover:text-accent line-clamp-1">
-                    {sample.title}
-                  </div>
-                  <div className="flex gap-1.5 mb-1.5">
-                    <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-[#232833] text-text-secondary border border-border">
-                      {sample.badge1}
-                    </span>
-                    <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-[#232833] text-text-secondary border border-border">
-                      {sample.badge2}
-                    </span>
-                  </div>
-                  <div className="text-[10px] text-text-tertiary truncate">
-                    📎 {sample.docName}
-                  </div>
-                </button>
-              ))}
-            </div>
+      {/* Drag overlay indicator */}
+      {isDragging && (
+        <div className="absolute inset-0 bg-accent/15 border-2 border-dashed border-accent z-50 flex items-center justify-center backdrop-blur-xs pointer-events-none">
+          <div className="bg-bg-panel p-5 rounded-lg border border-accent flex flex-col items-center gap-2 shadow-2xl">
+            <Paperclip className="w-8 h-8 text-accent animate-bounce" />
+            <span className="text-sm font-mono font-bold text-text-primary">
+              Drop file here to attach to prompt
+            </span>
           </div>
         </div>
-      ) : (
-        /* Conversation Feed matching Reference Image 2 Bottom Right */
-        <div className="flex-1 flex flex-col gap-4 overflow-y-auto mb-6 max-w-3xl w-full mx-auto">
-          <div className="flex items-center justify-between pb-2 border-b border-border">
-            <span className="text-xs font-semibold text-text-primary">Chat with Your Data</span>
-            <button
-              onClick={() => setMessages([])}
-              className="text-[11px] font-mono text-text-tertiary hover:text-text-secondary flex items-center gap-1"
-            >
-              <RotateCcw className="w-3 h-3" /> Clear Chat
-            </button>
-          </div>
+      )}
 
+      {/* Messages Scroll Area */}
+      <div className="flex-1 overflow-y-auto px-4 py-6 flex flex-col items-center">
+        {messages.length === 0 && !isResponding && (
+          <div className="flex flex-col items-center text-center max-w-2xl my-auto animate-in fade-in duration-300">
+            {/* Logo */}
+            <div className="mb-4">
+              <HexLogo size={56} />
+            </div>
+
+            {/* Heading */}
+            <h1 className="text-xl sm:text-2xl font-semibold text-text-primary mb-2 tracking-tight">
+              Where knowledge meets absolute sovereignty
+            </h1>
+
+            {/* Subtitle */}
+            <p className="text-xs text-text-secondary mb-8 max-w-lg leading-relaxed">
+              Airgapped, localized intelligence for high-consequence enterprise, defense, and industrial operations.
+            </p>
+
+            {/* 5 Capability Action Cards */}
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 w-full mb-8">
+              <button
+                onClick={() => handleActionCard('chat')}
+                className="flex flex-col items-center text-center p-4 rounded-md bg-bg-panel border border-border hover:border-accent transition-all group hover:-translate-y-0.5"
+              >
+                <div className="w-9 h-9 rounded-lg bg-bg-elevated border border-border flex items-center justify-center mb-2.5 text-accent group-hover:scale-110 transition-transform">
+                  <MessageSquare className="w-5 h-5" />
+                </div>
+                <h2 className="text-sm font-semibold text-text-primary mb-1">Chat</h2>
+                <p className="text-xs text-text-tertiary leading-snug">
+                  Get answers, generate content, and solve problems
+                </p>
+              </button>
+
+              <button
+                onClick={() => handleActionCard('docs')}
+                className="flex flex-col items-center text-center p-4 rounded-md bg-bg-panel border border-border hover:border-accent transition-all group hover:-translate-y-0.5"
+              >
+                <div className="w-9 h-9 rounded-lg bg-bg-elevated border border-border flex items-center justify-center mb-2.5 text-ok group-hover:scale-110 transition-transform">
+                  <FileText className="w-5 h-5" />
+                </div>
+                <h2 className="text-sm font-semibold text-text-primary mb-1">Analyze Documents</h2>
+                <p className="text-xs text-text-tertiary leading-snug">
+                  Upload and analyze PDFs, reports, and more
+                </p>
+              </button>
+
+              <button
+                onClick={() => handleActionCard('images')}
+                className="flex flex-col items-center text-center p-4 rounded-md bg-bg-panel border border-border hover:border-accent transition-all group hover:-translate-y-0.5"
+              >
+                <div className="w-9 h-9 rounded-lg bg-bg-elevated border border-border flex items-center justify-center mb-2.5 text-modality-vision group-hover:scale-110 transition-transform">
+                  <ImageIcon className="w-5 h-5" />
+                </div>
+                <h2 className="text-sm font-semibold text-text-primary mb-1">Analyze Images</h2>
+                <p className="text-xs text-text-tertiary leading-snug">
+                  Understand diagrams, charts, and photos
+                </p>
+              </button>
+
+              <button
+                onClick={() => handleActionCard('data')}
+                className="flex flex-col items-center text-center p-4 rounded-md bg-bg-panel border border-border hover:border-accent transition-all group hover:-translate-y-0.5"
+              >
+                <div className="w-9 h-9 rounded-lg bg-bg-elevated border border-border flex items-center justify-center mb-2.5 text-modality-coding group-hover:scale-110 transition-transform">
+                  <BarChart3 className="w-5 h-5" />
+                </div>
+                <h2 className="text-sm font-semibold text-text-primary mb-1">Data Analysis</h2>
+                <p className="text-xs text-text-tertiary leading-snug">
+                  Work with structured data and generate insights
+                </p>
+              </button>
+
+              <button
+                onClick={() => handleActionCard('tools')}
+                className="col-span-2 sm:col-span-1 flex flex-col items-center text-center p-4 rounded-md bg-bg-panel border border-border hover:border-accent transition-all group hover:-translate-y-0.5"
+              >
+                <div className="w-9 h-9 rounded-lg bg-bg-elevated border border-border flex items-center justify-center mb-2.5 text-warn group-hover:scale-110 transition-transform">
+                  <Wrench className="w-5 h-5" />
+                </div>
+                <h2 className="text-sm font-semibold text-text-primary mb-1">Use Tools</h2>
+                <p className="text-xs text-text-tertiary leading-snug">
+                  Access specialized tools and agents
+                </p>
+              </button>
+            </div>
+
+            {/* Starter Sample Cards matching FRONTEND_SPECIFICATION.md Section 4.1 */}
+            <div className="w-full max-w-2xl mb-8 text-left">
+              <div className="flex items-center justify-between mb-2">
+                <div className="text-xs font-mono text-text-tertiary uppercase tracking-wider">
+                  Sample Tasks & Preloaded Corpus
+                </div>
+                <MockBadge label="Sample Tasks" size="sm" />
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                {MOCK_SAMPLE_PROMPTS.map((sample, i) => (
+                  <button
+                    key={i}
+                    onClick={() => handleSelectStarter(sample)}
+                    className="p-3 rounded bg-bg-panel border border-border hover:border-accent text-left transition-all group"
+                  >
+                    <div className="text-xs font-medium text-text-primary mb-1.5 group-hover:text-accent line-clamp-1">
+                      {sample.title}
+                    </div>
+                    <div className="flex gap-1.5 mb-1.5">
+                      <span className="text-xs font-mono px-2 py-0.5 rounded bg-[#232833] text-text-secondary border border-border">
+                        {sample.badge1}
+                      </span>
+                      <span className="text-xs font-mono px-2 py-0.5 rounded bg-[#232833] text-text-secondary border border-border">
+                        {sample.badge2}
+                      </span>
+                    </div>
+                    <div className="text-xs text-text-tertiary line-clamp-2">
+                      {sample.prompt}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Render Conversation Messages */}
+        <div className="w-full max-w-3xl flex flex-col gap-6">
           {messages.map((msg, idx) => (
             <div
               key={idx}
-              className={`flex flex-col gap-1.5 ${
+              className={`flex flex-col gap-2 ${
                 msg.role === 'user' ? 'items-end' : 'items-start'
               }`}
             >
-              {msg.role === 'user' ? (
-                <div className="max-w-xl bg-accent/15 border border-accent/30 rounded-lg px-4 py-2.5 text-xs text-text-primary leading-relaxed">
-                  {msg.content}
-                </div>
-              ) : (
-                <div className="w-full max-w-2xl bg-bg-panel border border-border rounded-lg p-4 text-xs text-text-primary leading-relaxed shadow-sm">
-                  <div className="flex items-center justify-between mb-2 pb-1.5 border-b border-border">
-                    <div className="flex items-center gap-2">
-                      <HexLogo size={18} />
-                      <span className="font-semibold text-[11px] text-text-primary">
-                        {activeModelName}
-                      </span>
+              {/* Message Header */}
+              <div className="flex items-center gap-2 text-xs font-mono text-text-tertiary px-1">
+                {msg.role === 'user' ? (
+                  <span>Operator</span>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="w-3.5 h-3.5 text-accent" />
+                    <span className="font-semibold text-text-primary">
+                      {msg.modelUsed || 'Qwen 2.5 VL 72B'}
+                    </span>
+                    {msg.isMock && <MockBadge label="Simulated Inference" size="sm" />}
+                  </div>
+                )}
+              </div>
+
+              {/* Message Bubble */}
+              <div
+                className={`p-4 rounded-lg max-w-2xl text-xs sm:text-sm leading-relaxed ${
+                  msg.role === 'user'
+                    ? 'bg-accent/15 border border-accent/40 text-text-primary'
+                    : 'bg-bg-panel border border-border text-text-primary shadow-md'
+                }`}
+              >
+                {/* User attached file badge if present */}
+                {msg.attachedFile && (
+                  <div className="mb-2.5 pb-2 border-b border-border/50 flex items-center justify-between gap-2 font-mono text-xs">
+                    <div className="flex items-center gap-1.5 text-accent">
+                      {getFileIcon(msg.attachedFile.name)}
+                      <span className="font-semibold">{msg.attachedFile.name}</span>
+                      <span className="text-text-tertiary">({msg.attachedFile.info})</span>
                     </div>
-                    {msg.latency && (
-                      <span className="font-mono text-[10px] text-text-tertiary">
-                        Tokens: {msg.tokens} | Latency: {msg.latency}
+                    {msg.attachedFile.isMockSample ? (
+                      <MockBadge label="Mock Doc" size="sm" />
+                    ) : (
+                      <span className="px-2 py-0.5 rounded text-xs font-mono bg-ok/15 text-ok border border-ok/30">
+                        Local File
                       </span>
                     )}
                   </div>
+                )}
 
-                  <div className="whitespace-pre-line text-text-secondary mb-3">
-                    {msg.content}
+                <div className="whitespace-pre-line font-sans">{msg.content}</div>
+
+                {/* Grounded Citations */}
+                {msg.sources && msg.sources.length > 0 && (
+                  <div className="mt-3 pt-3 border-t border-border flex flex-wrap gap-2 text-xs font-mono">
+                    <span className="text-text-tertiary flex items-center gap-1">
+                      <CheckCircle2 className="w-3 h-3 text-ok" />
+                      Grounded in:
+                    </span>
+                    {msg.sources.map((s, sIdx) => (
+                      <span
+                        key={sIdx}
+                        className="px-2 py-0.5 rounded bg-bg-elevated border border-border text-text-secondary"
+                      >
+                        {s}
+                      </span>
+                    ))}
                   </div>
+                )}
+              </div>
 
-                  {msg.sources && msg.sources.length > 0 && (
-                    <div className="pt-2 border-t border-border flex flex-wrap items-center gap-2 text-[11px] font-mono text-text-tertiary">
-                      <span className="text-text-secondary font-semibold">Sources:</span>
-                      {msg.sources.map((src, sIdx) => (
-                        <span
-                          key={sIdx}
-                          className="px-2 py-0.5 rounded bg-bg-elevated border border-border text-accent hover:underline cursor-pointer"
-                        >
-                          {src}
-                        </span>
-                      ))}
-                    </div>
-                  )}
+              {/* Assistant Message Footer */}
+              {msg.role === 'assistant' && (
+                <div className="flex items-center gap-3 text-xs font-mono text-text-tertiary px-1">
+                  <span>{msg.tokens} tokens</span>
+                  <span>·</span>
+                  <span>{msg.latency}</span>
+                  <div className="flex items-center gap-1.5 ml-2">
+                    <button
+                      onClick={() => navigator.clipboard.writeText(msg.content)}
+                      className="p-1 hover:text-text-primary transition-colors"
+                      title="Copy Response"
+                    >
+                      <Copy className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      onClick={() => {
+                        const lastUser = messages.filter((m) => m.role === 'user').pop();
+                        if (lastUser) {
+                          setPendingPrompt(lastUser.content);
+                          setIsResponding(true);
+                        }
+                      }}
+                      className="p-1 hover:text-text-primary transition-colors"
+                      title="Regenerate Response"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
           ))}
 
-          {isResponding && (
-            <div className="flex items-center gap-2 text-xs text-accent font-mono animate-pulse">
-              <Sparkles className="w-4 h-4" /> Generating grounded response with local open weights...
+          {/* Inference Visualization DAG (Shown while responding) */}
+          {isResponding && pendingPrompt && (
+            <div className="w-full my-2">
+              <InferenceGraph
+                prompt={pendingPrompt}
+                attachmentName={attachedFile?.name}
+                onComplete={handleInferenceComplete}
+              />
             </div>
           )}
         </div>
-      )}
+      </div>
 
-      {/* Composer Section (720px width centered) */}
-      <div className="w-full max-w-3xl mx-auto flex flex-col gap-2">
-        {/* Provisional Routing Strip */}
+      {/* Composer Input Area */}
+      <div className="w-full max-w-3xl mx-auto px-4 pb-4 flex flex-col gap-2 relative">
+        {/* Provisional Routing Hint */}
         {provisionalDecision && (
-          <div className="bg-[#171B22] border border-accent/40 rounded px-3 py-1.5 flex items-center justify-between text-[11px] font-mono animate-in fade-in duration-200">
+          <div className="px-3 py-1.5 rounded-t-md bg-bg-panel/80 border border-b-0 border-border text-xs font-mono flex items-center justify-between text-text-secondary animate-in fade-in duration-150">
             <div className="flex items-center gap-2 truncate">
-              <span className="text-accent font-bold">⚡ PROVISIONAL ROUTING:</span>
-              <span className="text-text-secondary truncate">
-                {provisionalDecision.task.intent} → Selected:{' '}
+              <span className="w-2 h-2 rounded-full bg-accent animate-pulse" />
+              <span>
+                Routing to:{' '}
                 <strong className="text-text-primary">
                   {provisionalDecision.decision.selected}
                 </strong>{' '}
                 (Score: {provisionalDecision.decision.score})
               </span>
             </div>
-            <span className="text-text-tertiary flex-shrink-0">
-              ~{provisionalDecision.task.estimated_input_tokens} tokens
-            </span>
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <MockBadge label="Simulated Decision" size="sm" />
+              <span className="text-text-tertiary">
+                ~{provisionalDecision.task.estimated_input_tokens} tokens
+              </span>
+            </div>
           </div>
         )}
 
         {/* Attached file chip */}
         {attachedFile && (
-          <div className="flex items-center gap-2 px-3 py-1 bg-bg-panel border border-border rounded text-xs font-mono">
-            <span className="text-accent">📎 {attachedFile.name}</span>
-            <span className="text-text-tertiary">({attachedFile.info})</span>
+          <div className="flex items-center justify-between gap-2 px-3 py-2 bg-bg-panel border border-border rounded-md text-xs font-mono animate-in fade-in duration-150 shadow-sm">
+            <div className="flex items-center gap-2 truncate">
+              {getFileIcon(attachedFile.name)}
+              <span className="text-accent font-semibold truncate">{attachedFile.name}</span>
+              <span className="text-text-tertiary">({attachedFile.info})</span>
+              {attachedFile.isMockSample ? (
+                <MockBadge label="Sample Document" size="sm" />
+              ) : (
+                <span className="px-2 py-0.5 rounded text-xs font-mono bg-ok/15 text-ok border border-ok/30">
+                  Local Upload
+                </span>
+              )}
+            </div>
             <button
               onClick={() => setAttachedFile(null)}
-              className="ml-auto text-text-tertiary hover:text-error"
+              className="p-1 text-text-tertiary hover:text-error hover:bg-bg-elevated rounded transition-colors"
+              title="Remove attachment"
             >
-              ×
+              <X className="w-4 h-4" />
             </button>
           </div>
         )}
 
-        {/* Composer Input Box matching Reference Image 1 */}
+        {/* Attachment Options Popover Menu */}
+        {showAttachMenu && (
+          <div className="absolute bottom-20 left-4 bg-bg-elevated border border-border rounded-lg p-2 shadow-2xl z-50 flex flex-col gap-1 w-72 text-xs font-mono animate-in fade-in slide-in-from-bottom-2 duration-150">
+            <div className="px-2.5 py-1 text-text-tertiary uppercase font-bold text-[11px] border-b border-border mb-1">
+              Select Attachment Source
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setShowAttachMenu(false);
+                fileInputRef.current?.click();
+              }}
+              className="flex items-center gap-2.5 px-2.5 py-2 rounded hover:bg-bg-panel text-text-primary text-left transition-colors group"
+            >
+              <Paperclip className="w-4 h-4 text-accent group-hover:scale-110 transition-transform" />
+              <div>
+                <div className="font-semibold">Upload from Device...</div>
+                <div className="text-[11px] text-text-tertiary">PDF, DOCX, CSV, PNG, TXT</div>
+              </div>
+            </button>
+
+            <div className="border-t border-border my-1" />
+            <div className="px-2.5 py-1 text-text-tertiary uppercase font-bold text-[11px]">
+              Or Preloaded Sample Docs:
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setAttachedFile({
+                  name: 'Refinery_Safety_Manual.pdf',
+                  info: '2.4 MB · Digital PDF',
+                  isMockSample: true,
+                });
+                setShowAttachMenu(false);
+              }}
+              className="flex items-center justify-between px-2.5 py-1.5 rounded hover:bg-bg-panel text-text-secondary hover:text-text-primary text-left transition-colors"
+            >
+              <span className="truncate">Refinery_Safety_Manual.pdf</span>
+              <MockBadge label="Mock" size="sm" />
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setAttachedFile({
+                  name: 'Crude_Assay_Telemetrics.csv',
+                  info: '840 KB · Tabular Data',
+                  isMockSample: true,
+                });
+                setShowAttachMenu(false);
+              }}
+              className="flex items-center justify-between px-2.5 py-1.5 rounded hover:bg-bg-panel text-text-secondary hover:text-text-primary text-left transition-colors"
+            >
+              <span className="truncate">Crude_Assay_Telemetrics.csv</span>
+              <MockBadge label="Mock" size="sm" />
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setAttachedFile({
+                  name: 'Piping_PID_Diagram.png',
+                  info: '3.1 MB · Engineering Drawing',
+                  isMockSample: true,
+                });
+                setShowAttachMenu(false);
+              }}
+              className="flex items-center justify-between px-2.5 py-1.5 rounded hover:bg-bg-panel text-text-secondary hover:text-text-primary text-left transition-colors"
+            >
+              <span className="truncate">Piping_PID_Diagram.png</span>
+              <MockBadge label="Mock" size="sm" />
+            </button>
+          </div>
+        )}
+
+        {/* Composer Input Box */}
         <form
           onSubmit={handleSend}
-          className="bg-bg-panel border border-border focus-within:border-accent rounded-lg p-3 transition-colors shadow-lg flex flex-col gap-3"
+          className="bg-bg-panel border border-border focus-within:border-accent rounded-lg p-3.5 transition-colors shadow-lg flex flex-col gap-3"
         >
           <textarea
             rows={2}
@@ -392,47 +621,56 @@ All context, vector embeddings, and generation were computed within your airgapp
                 handleSend();
               }
             }}
-            placeholder="Type your message here... (Enter to submit, Shift+Enter for newline)"
-            className="w-full bg-transparent text-xs text-text-primary placeholder-text-tertiary resize-none focus:outline-none leading-relaxed"
+            placeholder={
+              attachedFile
+                ? `Ask questions about ${attachedFile.name}... (Enter to submit)`
+                : 'Type your message here... (Enter to submit, Shift+Enter for newline)'
+            }
+            className="w-full bg-transparent text-sm sm:text-base text-text-primary placeholder-text-tertiary resize-none focus:outline-none leading-relaxed"
           />
 
           <div className="flex items-center justify-between border-t border-border/60 pt-2.5">
             {/* Attachment & Tool buttons */}
             <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() =>
-                  setAttachedFile({ name: 'Refinery_Safety_Manual.pdf', info: '2.4 MB, digital' })
-                }
-                className="flex items-center gap-1.5 px-2.5 py-1 rounded text-xs text-text-secondary hover:text-text-primary hover:bg-bg-elevated transition-colors border border-transparent hover:border-border"
-                title="Attach Document"
-              >
-                <Paperclip className="w-3.5 h-3.5" />
-                <span>Attach</span>
-              </button>
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setShowAttachMenu(!showAttachMenu)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs transition-colors border font-mono ${
+                    attachedFile
+                      ? 'bg-accent/15 text-accent border-accent/40 font-semibold'
+                      : 'text-text-secondary hover:text-text-primary hover:bg-bg-elevated border-transparent hover:border-border'
+                  }`}
+                  title="Attach Document or Image"
+                >
+                  <Paperclip className="w-4 h-4" />
+                  <span>{attachedFile ? 'Attached' : 'Attach'}</span>
+                  <ChevronDown className="w-3 h-3 opacity-60" />
+                </button>
+              </div>
 
               <button
                 type="button"
                 onClick={() => router.push('/workflows')}
-                className="flex items-center gap-1.5 px-2.5 py-1 rounded text-xs text-text-secondary hover:text-text-primary hover:bg-bg-elevated transition-colors border border-transparent hover:border-border"
-                title="Tools & Agents"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs text-text-secondary hover:text-text-primary hover:bg-bg-elevated transition-colors border border-transparent hover:border-border font-mono"
+                title="Tools & Workflow Orchestrator"
               >
-                <Wrench className="w-3.5 h-3.5" />
-                <span>Tools</span>
+                <Wrench className="w-4 h-4" />
+                <span>Workflows</span>
               </button>
 
               <button
                 type="button"
                 onClick={() => setLocalSearchEnabled(!localSearchEnabled)}
-                className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs transition-colors border ${
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs transition-colors border font-mono ${
                   localSearchEnabled
-                    ? 'bg-ok/10 text-ok border-ok/30'
+                    ? 'bg-ok/10 text-ok border-ok/30 font-medium'
                     : 'text-text-tertiary hover:text-text-secondary border-transparent'
                 }`}
                 title="Search Grounded Local Documents"
               >
-                <Globe className="w-3.5 h-3.5" />
-                <span>Web Search (Local)</span>
+                <Globe className="w-4 h-4" />
+                <span>Local Vector RAG</span>
               </button>
             </div>
 
@@ -448,7 +686,7 @@ All context, vector embeddings, and generation were computed within your airgapp
         </form>
 
         {/* Footer statement */}
-        <p className="text-center text-[11px] text-text-tertiary font-mono">
+        <p className="text-center text-xs text-text-tertiary font-mono">
           Your data stays within your infrastructure. Always.
         </p>
       </div>

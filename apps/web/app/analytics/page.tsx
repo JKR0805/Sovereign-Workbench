@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { MetricStat } from '../../components/primitives/MetricStat';
+import { MockBadge } from '../../components/primitives/MockBadge';
 import {
   MessageSquare,
   FileText,
@@ -52,9 +53,12 @@ export default function AnalyticsPage() {
       {/* Header matching Reference Image 2 */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-border pb-4">
         <div>
-          <h1 className="text-xl font-bold tracking-tight text-text-primary">
-            System Analytics
-          </h1>
+          <div className="flex items-center gap-2.5">
+            <h1 className="text-xl font-bold tracking-tight text-text-primary">
+              System Analytics
+            </h1>
+            <MockBadge label="Mock Telemetrics" size="sm" />
+          </div>
           <p className="text-xs text-text-secondary">
             Operational metrics, query distribution, and local hardware utilization
           </p>
@@ -134,10 +138,10 @@ export default function AnalyticsPage() {
         <div className="lg:col-span-2 bg-bg-panel border border-border rounded-md p-5 flex flex-col gap-4">
           <div className="flex items-center justify-between">
             <div>
-              <h2 className="text-xs font-bold text-text-primary uppercase tracking-wider font-mono">
+              <h2 className="text-sm font-bold text-text-primary uppercase tracking-wider font-mono">
                 Query Volume
               </h2>
-              <span className="text-[11px] text-text-tertiary">Daily token queries handled locally</span>
+              <span className="text-xs text-text-tertiary">Daily token queries handled locally</span>
             </div>
             <span className="text-xs font-mono text-ok font-semibold">Peak: 142 queries/day</span>
           </div>
@@ -154,13 +158,13 @@ export default function AnalyticsPage() {
                 <XAxis
                   dataKey="date"
                   stroke="#5A6376"
-                  fontSize={10}
+                  fontSize={12}
                   tickLine={false}
                   fontFamily="JetBrains Mono"
                 />
                 <YAxis
                   stroke="#5A6376"
-                  fontSize={10}
+                  fontSize={12}
                   tickLine={false}
                   fontFamily="JetBrains Mono"
                 />
@@ -169,7 +173,7 @@ export default function AnalyticsPage() {
                     backgroundColor: '#171B22',
                     borderColor: '#2E3542',
                     borderRadius: '4px',
-                    fontSize: '11px',
+                    fontSize: '13px',
                     fontFamily: 'JetBrains Mono',
                   }}
                 />
@@ -189,10 +193,10 @@ export default function AnalyticsPage() {
         {/* Right: Donut Chart matching Reference Image 2 */}
         <div className="bg-bg-panel border border-border rounded-md p-5 flex flex-col justify-between">
           <div>
-            <h2 className="text-xs font-bold text-text-primary uppercase tracking-wider font-mono mb-1">
+            <h2 className="text-sm font-bold text-text-primary uppercase tracking-wider font-mono mb-1">
               Query Distribution by Task
             </h2>
-            <span className="text-[11px] text-text-tertiary">Workload routing allocation</span>
+            <span className="text-xs text-text-tertiary">Workload routing allocation</span>
           </div>
 
           <div className="h-44 w-full my-2 flex items-center justify-center">
@@ -216,7 +220,7 @@ export default function AnalyticsPage() {
                     backgroundColor: '#171B22',
                     borderColor: '#2E3542',
                     borderRadius: '4px',
-                    fontSize: '11px',
+                    fontSize: '13px',
                     fontFamily: 'JetBrains Mono',
                   }}
                 />
@@ -225,7 +229,7 @@ export default function AnalyticsPage() {
           </div>
 
           {/* Legend */}
-          <div className="flex flex-col gap-1.5 pt-2 border-t border-border text-[11px] font-mono">
+          <div className="flex flex-col gap-1.5 pt-2 border-t border-border text-xs font-mono">
             {taskDistributionData.map((item) => (
               <div key={item.name} className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
