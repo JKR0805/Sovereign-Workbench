@@ -1,12 +1,19 @@
+# Web
+node_modules/
+.next/
+.env
+.env.local
+dist/
+build/
+*.tsbuildinfo
+
 # Python
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
-build/
 develop-eggs/
-dist/
 downloads/
 eggs/
 .eggs/
