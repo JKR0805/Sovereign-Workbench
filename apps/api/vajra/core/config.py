@@ -28,13 +28,23 @@ from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-def _default_data_dir() -> Path:
-    """Repository ``data/`` directory.
+def find_repo_root() -> Path:
+    """Find the repository or application root whether running in local dev or in Docker."""
+    current = Path(__file__).resolve()
+    for parent in current.parents:
+        if (parent / "config").is_dir() or (parent / "apps").is_dir():
+            return parent
+    cwd = Path.cwd()
+    if (cwd / "config").is_dir():
+        return cwd
+    if len(current.parents) >= 5:
+        return current.parents[4]
+    return current.parents[min(2, len(current.parents) - 1)]
 
-    This file is ``<repo>/apps/api/vajra/core/config.py``, so four parents up is
-    the repository root.
-    """
-    return Path(__file__).resolve().parents[4] / "data"
+
+def _default_data_dir() -> Path:
+    """Repository ``data/`` directory."""
+    return find_repo_root() / "data"
 
 
 class Profile(str, Enum):

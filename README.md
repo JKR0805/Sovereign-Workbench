@@ -102,69 +102,73 @@ It combines multi-model orchestration, multi-turn document persistence, local hy
 
 ## Quick Start (Local Setup)
 
-### Prerequisites
-* **Python 3.11+**
-* **Node.js 18+** & **npm**
-* **Ollama** installed locally
+### 1. Start Local LLM Inference (Ollama)
+Ensure **Ollama** is running locally for LLM inference:
+```powershell
+ollama serve
+
+# In another terminal, pull recommended models
+ollama pull qwen2.5:7b
+ollama pull nomic-embed-text:latest
+```
+*(Vector database requires zero setup: VAJRA automatically initializes embedded local on-disk Qdrant at `data/qdrant` if no external server is running).*
 
 ---
 
-### 1. Backend Setup
+### 2. Run Backend (FastAPI)
+Open a terminal and navigate to `apps/api`:
 
 ```powershell
-# Navigate to API directory
+# 1. Navigate to api directory
 cd apps\api
 
-# Create & activate virtual environment
+# 2. Create & activate virtual environment (if not already done)
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1   # On Linux/macOS: source .venv/bin/activate
 
-# Install dependencies in editable mode
+# 3. Install backend dependencies in editable mode
 pip install -e .
 
-# Run the 84 unit tests
-pytest apps/api/tests/unit
-```
-
-### 2. Pull Recommended Local Models (Ollama)
-
-```powershell
-# Start Ollama service
-ollama serve
-
-# Pull models defined in laptop-8gb.yaml profile
-ollama pull qwen3:8b
-ollama pull qwen2.5-coder:7b
-ollama pull llava:7b
-ollama pull nomic-embed-text:latest
-```
-
-### 3. Start Backend Server
-
-```powershell
-# From repository root (with .venv active)
+# 4. Launch Backend API
 python -m vajra.main
+# (or: uvicorn vajra.main:app --reload)
 ```
-The backend starts on `http://127.0.0.1:8000`.
-- **API Documentation**: [http://127.0.0.1:8000/api/docs](http://127.0.0.1:8000/api/docs)
-- **Health & Sovereignty Audit**: [http://127.0.0.1:8000/api/system/health](http://127.0.0.1:8000/api/system/health)
+
+* **Interactive Swagger UI**: [http://127.0.0.1:8000/api/docs](http://127.0.0.1:8000/api/docs)
+* **API Health & Sovereignty Audit**: [http://127.0.0.1:8000/api/system/health](http://127.0.0.1:8000/api/system/health)
+* **Registered Hardware Models**: [http://127.0.0.1:8000/api/models](http://127.0.0.1:8000/api/models)
+
+#### Backend Validation & Tests
+```powershell
+cd apps\api
+.\.venv\Scripts\Activate.ps1
+pytest -v          # Run 53-test suite
+ruff check .       # Run linter
+```
 
 ---
 
-### 4. Start Frontend Application
+### 3. Run Frontend (Next.js)
+Open a **new separate terminal**:
 
-In a separate terminal:
-
+#### Option A: From root directory
 ```powershell
-cd apps\web
-npm install
+# Run Next.js dev server directly from workspace root
 npm run dev
 ```
-Open [http://localhost:3000](http://localhost:3000) in your browser.
 
-#### Default Credentials
-* **Username**: `admin`
-* **Password**: `sovereign2026`
+#### Option B: From `apps/web` directory
+```powershell
+cd apps\web
+
+# Install frontend dependencies (if not already installed)
+npm install
+
+# Start Next.js development server
+npm run dev
+```
+
+* **Frontend UI**: [http://localhost:3000](http://localhost:3000)
 
 ---
 

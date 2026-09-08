@@ -1,5 +1,5 @@
 # VAJRA Sovereign On-Premise Backend
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 # Prevent python from writing pyc files and buffering stdout/stderr
 ENV PYTHONDONTWRITEBYTECODE=1 \

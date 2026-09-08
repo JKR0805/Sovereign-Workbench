@@ -1,0 +1,207 @@
+# VAJRA Hardware-Aware Model Profile: Laptop Qwen 2.5 (Low VRAM / Constrained Execution)
+# Section V: Bounded for 4.0 - 6.0 GB physical VRAM systems or constrained 8GB setups.
+# Prioritizes Qwen 2.5 3B (2.2 GB VRAM) for lightweight general reasoning and
+# offers both 3B and 7B coding specialists.
+
+hardware:
+  profile: laptop-qwen25
+  description: "Constrained 4GB-8GB laptop GPU (e.g. GTX 1650/1660, RTX 3050/4050 Laptop, or thin-and-light setups). Prioritizes Qwen 2.5 3B for minimal VRAM footprint (2.2 GB) with single-resident execution."
+  vram_mb: 6144
+  max_usable_vram_mb: 5120
+  max_loaded_models: 1
+  keep_alive: 30m
+  preferred_embedding_device: cpu
+
+runtime:
+  id: ollama
+  kind: ollama
+  base_url: http://127.0.0.1:11434
+
+models:
+  - id: general-qwen25-3b
+    display_name: "Qwen 2.5 3B"
+    role: general
+    runtime_id: ollama
+    runtime_model_id: qwen2.5:3b
+    capabilities:
+      text: 0.90
+      reasoning: 0.85
+      coding: 0.85
+      tool_calling: 0.85
+      structured_output: 0.85
+    context_window: 8192
+    max_output_tokens: 2048
+    num_ctx: 8192
+    device: gpu
+    vram_gb: 2.2
+    quantization: Q4_K_M
+    modalities_in:
+      - text
+    priority: 75
+    enabled: true
+    license: apache-2.0
+
+  - id: coding-qwen25-3b
+    display_name: "Qwen 2.5 Coder 3B"
+    role: coding
+    runtime_id: ollama
+    runtime_model_id: qwen2.5-coder:3b
+    capabilities:
+      text: 0.85
+      coding: 0.90
+      tool_calling: 0.85
+      structured_output: 0.85
+    context_window: 8192
+    max_output_tokens: 2048
+    num_ctx: 8192
+    device: gpu
+    vram_gb: 2.2
+    quantization: Q4_K_M
+    modalities_in:
+      - text
+    priority: 82
+    enabled: true
+    license: apache-2.0
+
+  - id: coding-specialist
+    display_name: "Qwen 2.5 Coder 7B"
+    role: coding
+    runtime_id: ollama
+    runtime_model_id: qwen2.5-coder:7b
+    capabilities:
+      text: 0.85
+      coding: 0.95
+      tool_calling: 0.90
+      structured_output: 0.90
+    context_window: 8192
+    max_output_tokens: 2048
+    num_ctx: 8192
+    device: gpu
+    vram_gb: 4.7
+    quantization: Q4_K_M
+    modalities_in:
+      - text
+    priority: 80
+    enabled: true
+    license: apache-2.0
+
+  - id: general-reasoning
+    display_name: "Qwen 3 8B"
+    role: general
+    runtime_id: ollama
+    runtime_model_id: qwen3:8b
+    capabilities:
+      text: 0.90
+      reasoning: 0.85
+    context_window: 8192
+    max_output_tokens: 2048
+    num_ctx: 8192
+    device: gpu
+    vram_gb: 5.2
+    quantization: Q4_K_M
+    modalities_in:
+      - text
+    priority: 60
+    enabled: true
+    license: apache-2.0
+
+  - id: vision-document
+    display_name: "Llava 7B (Vision Specialist)"
+    role: vision
+    runtime_id: ollama
+    runtime_model_id: llava:7b
+    capabilities:
+      text: 0.85
+      vision: 0.95
+      doc_understanding: 0.90
+    context_window: 4096
+    max_output_tokens: 2048
+    num_ctx: 4096
+    device: gpu
+    vram_gb: 4.7
+    quantization: Q4_0
+    modalities_in:
+      - text
+      - image
+    priority: 70
+    enabled: true
+    license: apache-2.0
+
+  - id: general-llama3
+    display_name: "Llama 3 8B"
+    role: general
+    runtime_id: ollama
+    runtime_model_id: llama3:latest
+    capabilities:
+      text: 0.90
+      reasoning: 0.85
+    context_window: 8192
+    max_output_tokens: 2048
+    num_ctx: 8192
+    device: gpu
+    vram_gb: 4.6
+    quantization: Q4_0
+    modalities_in:
+      - text
+    priority: 55
+    enabled: true
+    license: meta-llama-3
+
+  - id: general-mistral
+    display_name: "Mistral 7B"
+    role: general
+    runtime_id: ollama
+    runtime_model_id: mistral:latest
+    capabilities:
+      text: 0.85
+      reasoning: 0.80
+    context_window: 8192
+    max_output_tokens: 2048
+    num_ctx: 8192
+    device: gpu
+    vram_gb: 4.3
+    quantization: Q4_0
+    modalities_in:
+      - text
+    priority: 50
+    enabled: true
+    license: apache-2.0
+
+  - id: reasoning-phi35
+    display_name: "Phi 3.5 3.8B"
+    role: general
+    runtime_id: ollama
+    runtime_model_id: phi3.5:latest
+    capabilities:
+      text: 0.85
+      reasoning: 0.85
+    context_window: 4096
+    max_output_tokens: 2048
+    num_ctx: 4096
+    device: gpu
+    vram_gb: 2.2
+    quantization: Q4_0
+    modalities_in:
+      - text
+    priority: 45
+    enabled: true
+    license: mit
+
+  - id: text-embedding
+    display_name: "Nomic Embed Text (CPU)"
+    role: embedding
+    runtime_id: ollama
+    runtime_model_id: nomic-embed-text:latest
+    capabilities:
+      embedding: 0.90
+    context_window: 2048
+    max_output_tokens: 0
+    num_ctx: 2048
+    device: cpu
+    vram_gb: 0.0
+    quantization: F16
+    modalities_in:
+      - text
+    priority: 90
+    enabled: true
+    license: apache-2.0

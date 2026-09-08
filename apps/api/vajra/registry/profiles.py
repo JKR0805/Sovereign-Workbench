@@ -102,7 +102,9 @@ def load_profile(path_or_name: str | Path, config_dir: Path | None = None) -> Ha
         if config_dir is not None:
             search_dirs.extend([config_dir, config_dir / "models"])
         # Standard repository location
-        repo_root = Path(__file__).resolve().parents[4]
+        from vajra.core.config import find_repo_root
+
+        repo_root = find_repo_root()
         search_dirs.extend([
             repo_root / "config",
             repo_root / "config" / "models",
